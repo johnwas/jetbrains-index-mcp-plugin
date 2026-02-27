@@ -2,13 +2,13 @@ package com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.navigation
 
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.constants.ErrorMessages
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.constants.ParamNames
-import com.github.hechtcarmel.jetbrainsindexmcpplugin.constants.SchemaConstants
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.constants.ToolNames
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.constants.UsageTypes
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.server.models.ToolCallResult
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.AbstractMcpTool
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.models.FindUsagesResult
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.models.UsageLocation
+import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.schema.SchemaBuilder
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.util.PsiUtils
 import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.project.Project
@@ -20,13 +20,8 @@ import com.intellij.util.Processor
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.put
-import kotlinx.serialization.json.putJsonArray
-import kotlinx.serialization.json.putJsonObject
 
 class FindUsagesTool : AbstractMcpTool() {
 
@@ -47,36 +42,12 @@ class FindUsagesTool : AbstractMcpTool() {
         Example: {"file": "src/UserService.java", "line": 25, "column": 18}
     """.trimIndent()
 
-    override val inputSchema: JsonObject = buildJsonObject {
-        put(SchemaConstants.TYPE, SchemaConstants.TYPE_OBJECT)
-        putJsonObject(SchemaConstants.PROPERTIES) {
-            putJsonObject(ParamNames.PROJECT_PATH) {
-                put(SchemaConstants.TYPE, SchemaConstants.TYPE_STRING)
-                put(SchemaConstants.DESCRIPTION, "Absolute path to project root. Only needed when multiple projects are open in IDE.")
-            }
-            putJsonObject(ParamNames.FILE) {
-                put(SchemaConstants.TYPE, SchemaConstants.TYPE_STRING)
-                put(SchemaConstants.DESCRIPTION, "Path to file relative to project root (e.g., 'src/main/java/com/example/MyClass.java'). REQUIRED.")
-            }
-            putJsonObject(ParamNames.LINE) {
-                put(SchemaConstants.TYPE, SchemaConstants.TYPE_INTEGER)
-                put(SchemaConstants.DESCRIPTION, "1-based line number where the symbol is located. REQUIRED.")
-            }
-            putJsonObject(ParamNames.COLUMN) {
-                put(SchemaConstants.TYPE, SchemaConstants.TYPE_INTEGER)
-                put(SchemaConstants.DESCRIPTION, "1-based column number within the line. REQUIRED.")
-            }
-            putJsonObject("maxResults") {
-                put(SchemaConstants.TYPE, SchemaConstants.TYPE_INTEGER)
-                put(SchemaConstants.DESCRIPTION, "Maximum number of references to return. Default: $DEFAULT_MAX_RESULTS, max: $MAX_ALLOWED_RESULTS.")
-            }
-        }
-        putJsonArray(SchemaConstants.REQUIRED) {
-            add(JsonPrimitive(ParamNames.FILE))
-            add(JsonPrimitive(ParamNames.LINE))
-            add(JsonPrimitive(ParamNames.COLUMN))
-        }
-    }
+    override val inputSchema: JsonObject = SchemaBuilder.tool()
+        .projectPath()
+        .file(description = "Path to file relative to project root (e.g., 'src/main/java/com/example/MyClass.java'). REQUIRED.")
+        .lineAndColumn()
+        .intProperty("maxResults", "Maximum number of references to return. Default: $DEFAULT_MAX_RESULTS, max: $MAX_ALLOWED_RESULTS.")
+        .build()
 
     override suspend fun doExecute(project: Project, arguments: JsonObject): ToolCallResult {
         val file = arguments[ParamNames.FILE]?.jsonPrimitive?.content

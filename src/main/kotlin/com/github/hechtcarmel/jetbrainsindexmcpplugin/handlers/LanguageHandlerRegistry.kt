@@ -58,23 +58,9 @@ object LanguageHandlerRegistry {
 
         LOG.info("Registering language handlers...")
 
-        // Register Java handlers
-        registerJavaHandlers()
-
-        // Register Python handlers
-        registerPythonHandlers()
-
-        // Register JavaScript/TypeScript handlers
-        registerJavaScriptHandlers()
-
-        // Register Go handlers
-        registerGoHandlers()
-
-        // Register PHP handlers
-        registerPhpHandlers()
-
-        // Register Rust handlers
-        registerRustHandlers()
+        for (reg in handlerRegistrations) {
+            registerLanguageHandlers(reg.className, reg.displayName)
+        }
 
         LOG.info("Language handlers registered: " +
             "TypeHierarchy=${typeHierarchyHandlers.size}, " +
@@ -276,101 +262,27 @@ object LanguageHandlerRegistry {
         return element.language
     }
 
-    // Handler registration implementations
+    private data class HandlerRegistration(val className: String, val displayName: String)
 
-    private fun registerJavaHandlers() {
-        try {
-            // Load Java handlers via reflection to avoid compile-time dependency
-            val javaHandlerClass = Class.forName(
-                "com.github.hechtcarmel.jetbrainsindexmcpplugin.handlers.java.JavaHandlers"
-            )
-            val registerMethod = javaHandlerClass.getMethod("register", LanguageHandlerRegistry::class.java)
-            registerMethod.invoke(null, this)
-            LOG.info("Java handlers registered")
-        } catch (e: ClassNotFoundException) {
-            LOG.info("Java handlers not available (Java plugin not installed)")
-        } catch (e: Exception) {
-            LOG.warn("Failed to register Java handlers: ${e.message}")
-        }
-    }
+    private val handlerRegistrations = listOf(
+        HandlerRegistration("com.github.hechtcarmel.jetbrainsindexmcpplugin.handlers.java.JavaHandlers", "Java"),
+        HandlerRegistration("com.github.hechtcarmel.jetbrainsindexmcpplugin.handlers.python.PythonHandlers", "Python"),
+        HandlerRegistration("com.github.hechtcarmel.jetbrainsindexmcpplugin.handlers.javascript.JavaScriptHandlers", "JavaScript"),
+        HandlerRegistration("com.github.hechtcarmel.jetbrainsindexmcpplugin.handlers.go.GoHandlers", "Go"),
+        HandlerRegistration("com.github.hechtcarmel.jetbrainsindexmcpplugin.handlers.php.PhpHandlers", "PHP"),
+        HandlerRegistration("com.github.hechtcarmel.jetbrainsindexmcpplugin.handlers.rust.RustHandlers", "Rust"),
+    )
 
-    private fun registerPythonHandlers() {
+    private fun registerLanguageHandlers(className: String, displayName: String) {
         try {
-            // Load Python handlers via reflection
-            val pythonHandlerClass = Class.forName(
-                "com.github.hechtcarmel.jetbrainsindexmcpplugin.handlers.python.PythonHandlers"
-            )
-            val registerMethod = pythonHandlerClass.getMethod("register", LanguageHandlerRegistry::class.java)
+            val handlerClass = Class.forName(className)
+            val registerMethod = handlerClass.getMethod("register", LanguageHandlerRegistry::class.java)
             registerMethod.invoke(null, this)
-            LOG.info("Python handlers registered")
+            LOG.info("$displayName handlers registered")
         } catch (e: ClassNotFoundException) {
-            LOG.info("Python handlers not available (Python plugin not installed)")
+            LOG.info("$displayName handlers not available ($displayName plugin not installed)")
         } catch (e: Exception) {
-            LOG.warn("Failed to register Python handlers: ${e.message}")
-        }
-    }
-
-    private fun registerJavaScriptHandlers() {
-        try {
-            // Load JavaScript handlers via reflection
-            val jsHandlerClass = Class.forName(
-                "com.github.hechtcarmel.jetbrainsindexmcpplugin.handlers.javascript.JavaScriptHandlers"
-            )
-            val registerMethod = jsHandlerClass.getMethod("register", LanguageHandlerRegistry::class.java)
-            registerMethod.invoke(null, this)
-            LOG.info("JavaScript handlers registered")
-        } catch (e: ClassNotFoundException) {
-            LOG.info("JavaScript handlers not available (JavaScript plugin not installed)")
-        } catch (e: Exception) {
-            LOG.warn("Failed to register JavaScript handlers: ${e.message}")
-        }
-    }
-
-    private fun registerGoHandlers() {
-        try {
-            // Load Go handlers via reflection
-            val goHandlerClass = Class.forName(
-                "com.github.hechtcarmel.jetbrainsindexmcpplugin.handlers.go.GoHandlers"
-            )
-            val registerMethod = goHandlerClass.getMethod("register", LanguageHandlerRegistry::class.java)
-            registerMethod.invoke(null, this)
-            LOG.info("Go handlers registered")
-        } catch (e: ClassNotFoundException) {
-            LOG.info("Go handlers not available (Go plugin not installed)")
-        } catch (e: Exception) {
-            LOG.warn("Failed to register Go handlers: ${e.message}")
-        }
-    }
-
-    private fun registerPhpHandlers() {
-        try {
-            // Load PHP handlers via reflection
-            val phpHandlerClass = Class.forName(
-                "com.github.hechtcarmel.jetbrainsindexmcpplugin.handlers.php.PhpHandlers"
-            )
-            val registerMethod = phpHandlerClass.getMethod("register", LanguageHandlerRegistry::class.java)
-            registerMethod.invoke(null, this)
-            LOG.info("PHP handlers registered")
-        } catch (e: ClassNotFoundException) {
-            LOG.info("PHP handlers not available (PHP plugin not installed)")
-        } catch (e: Exception) {
-            LOG.warn("Failed to register PHP handlers: ${e.message}")
-        }
-    }
-
-    private fun registerRustHandlers() {
-        try {
-            // Load Rust handlers via reflection
-            val rustHandlerClass = Class.forName(
-                "com.github.hechtcarmel.jetbrainsindexmcpplugin.handlers.rust.RustHandlers"
-            )
-            val registerMethod = rustHandlerClass.getMethod("register", LanguageHandlerRegistry::class.java)
-            registerMethod.invoke(null, this)
-            LOG.info("Rust handlers registered")
-        } catch (e: ClassNotFoundException) {
-            LOG.info("Rust handlers not available (Rust plugin not installed)")
-        } catch (e: Exception) {
-            LOG.warn("Failed to register Rust handlers: ${e.message}")
+            LOG.warn("Failed to register $displayName handlers: ${e.message}", e)
         }
     }
 }

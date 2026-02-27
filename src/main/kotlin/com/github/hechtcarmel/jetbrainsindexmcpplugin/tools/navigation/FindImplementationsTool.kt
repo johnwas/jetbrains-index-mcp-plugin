@@ -5,15 +5,11 @@ import com.github.hechtcarmel.jetbrainsindexmcpplugin.server.models.ToolCallResu
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.AbstractMcpTool
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.models.ImplementationLocation
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.models.ImplementationResult
+import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.schema.SchemaBuilder
 import com.intellij.openapi.project.Project
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.put
-import kotlinx.serialization.json.putJsonArray
-import kotlinx.serialization.json.putJsonObject
 
 /**
  * Tool for finding implementations of interfaces, abstract classes, or methods across multiple languages.
@@ -38,32 +34,11 @@ class FindImplementationsTool : AbstractMcpTool() {
         Example: {"file": "src/Repository.java", "line": 8, "column": 18}
     """.trimIndent()
 
-    override val inputSchema: JsonObject = buildJsonObject {
-        put("type", "object")
-        putJsonObject("properties") {
-            putJsonObject("project_path") {
-                put("type", "string")
-                put("description", "Absolute path to the project root. Required when multiple projects are open.")
-            }
-            putJsonObject("file") {
-                put("type", "string")
-                put("description", "Path to the file relative to project root")
-            }
-            putJsonObject("line") {
-                put("type", "integer")
-                put("description", "1-based line number")
-            }
-            putJsonObject("column") {
-                put("type", "integer")
-                put("description", "1-based column number")
-            }
-        }
-        putJsonArray("required") {
-            add(JsonPrimitive("file"))
-            add(JsonPrimitive("line"))
-            add(JsonPrimitive("column"))
-        }
-    }
+    override val inputSchema: JsonObject = SchemaBuilder.tool()
+        .projectPath()
+        .file()
+        .lineAndColumn()
+        .build()
 
     override suspend fun doExecute(project: Project, arguments: JsonObject): ToolCallResult {
         val file = arguments["file"]?.jsonPrimitive?.content

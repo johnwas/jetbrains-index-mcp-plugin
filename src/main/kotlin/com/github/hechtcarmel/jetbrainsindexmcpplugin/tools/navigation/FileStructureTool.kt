@@ -4,14 +4,11 @@ import com.github.hechtcarmel.jetbrainsindexmcpplugin.handlers.LanguageHandlerRe
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.server.models.ToolCallResult
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.AbstractMcpTool
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.models.FileStructureResult
+import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.schema.SchemaBuilder
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.util.TreeFormatter
 import com.intellij.openapi.project.Project
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.put
-import kotlinx.serialization.json.putJsonArray
-import kotlinx.serialization.json.putJsonObject
 
 /**
  * Tool for analyzing the hierarchical structure of source files.
@@ -39,22 +36,10 @@ class FileStructureTool : AbstractMcpTool() {
         Example: {"file": "src/main/java/com/example/MyClass.java"}
     """.trimIndent()
 
-    override val inputSchema = buildJsonObject {
-        put("type", "object")
-        putJsonObject("properties") {
-            putJsonObject("project_path") {
-                put("type", "string")
-                put("description", "Absolute path to project root. Only needed when multiple projects are open.")
-            }
-            putJsonObject("file") {
-                put("type", "string")
-                put("description", "Path to file relative to project root (e.g., 'src/main/java/com/example/MyClass.java'). REQUIRED.")
-            }
-        }
-        putJsonArray("required") {
-            add(kotlinx.serialization.json.JsonPrimitive("file"))
-        }
-    }
+    override val inputSchema: JsonObject = SchemaBuilder.tool()
+        .projectPath()
+        .file(description = "Path to file relative to project root (e.g., 'src/main/java/com/example/MyClass.java'). REQUIRED.")
+        .build()
 
     override suspend fun doExecute(project: Project, arguments: JsonObject): ToolCallResult {
         val file = arguments["file"]?.jsonPrimitive?.content

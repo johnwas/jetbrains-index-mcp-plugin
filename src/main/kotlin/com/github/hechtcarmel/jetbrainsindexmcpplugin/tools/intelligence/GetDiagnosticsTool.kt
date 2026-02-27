@@ -5,6 +5,7 @@ import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.AbstractMcpTool
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.models.DiagnosticsResult
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.models.IntentionInfo
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.models.ProblemInfo
+import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.schema.SchemaBuilder
 import com.intellij.codeInsight.daemon.impl.DaemonCodeAnalyzerEx
 import com.intellij.codeInsight.daemon.impl.HighlightInfo
 import com.intellij.codeInsight.intention.IntentionManager
@@ -23,13 +24,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.put
-import kotlinx.serialization.json.putJsonArray
-import kotlinx.serialization.json.putJsonObject
 
 /**
  * MCP tool that analyzes files for code problems and available intentions.
@@ -62,38 +58,14 @@ class GetDiagnosticsTool : AbstractMcpTool() {
         Example: {"file": "src/MyClass.java"} or {"file": "src/MyClass.java", "line": 25, "column": 10}
     """.trimIndent()
 
-    override val inputSchema: JsonObject = buildJsonObject {
-        put("type", "object")
-        putJsonObject("properties") {
-            putJsonObject("project_path") {
-                put("type", "string")
-                put("description", "Absolute path to project root. Only needed when multiple projects are open in IDE.")
-            }
-            putJsonObject("file") {
-                put("type", "string")
-                put("description", "Path to file relative to project root (e.g., 'src/main/java/com/example/MyClass.java'). REQUIRED.")
-            }
-            putJsonObject("line") {
-                put("type", "integer")
-                put("description", "1-based line number for intention lookup. Optional, defaults to 1.")
-            }
-            putJsonObject("column") {
-                put("type", "integer")
-                put("description", "1-based column number for intention lookup. Optional, defaults to 1.")
-            }
-            putJsonObject("startLine") {
-                put("type", "integer")
-                put("description", "Filter problems to start from this line. Optional.")
-            }
-            putJsonObject("endLine") {
-                put("type", "integer")
-                put("description", "Filter problems to end at this line. Optional.")
-            }
-        }
-        putJsonArray("required") {
-            add(JsonPrimitive("file"))
-        }
-    }
+    override val inputSchema: JsonObject = SchemaBuilder.tool()
+        .projectPath()
+        .file(description = "Path to file relative to project root (e.g., 'src/main/java/com/example/MyClass.java'). REQUIRED.")
+        .intProperty("line", "1-based line number for intention lookup. Optional, defaults to 1.")
+        .intProperty("column", "1-based column number for intention lookup. Optional, defaults to 1.")
+        .intProperty("startLine", "Filter problems to start from this line. Optional.")
+        .intProperty("endLine", "Filter problems to end at this line. Optional.")
+        .build()
 
     override suspend fun doExecute(project: Project, arguments: JsonObject): ToolCallResult {
         // Parse arguments

@@ -1,13 +1,13 @@
 package com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.navigation
 
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.constants.ParamNames
-import com.github.hechtcarmel.jetbrainsindexmcpplugin.constants.SchemaConstants
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.constants.ToolNames
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.handlers.createFilteredScope
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.server.models.ToolCallResult
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.AbstractMcpTool
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.models.SearchTextResult
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.models.TextMatch
+import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.schema.SchemaBuilder
 import com.intellij.openapi.project.Project
 import com.intellij.psi.PsiDocumentManager
 import com.intellij.psi.PsiElement
@@ -19,14 +19,9 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.boolean
-import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.put
-import kotlinx.serialization.json.putJsonArray
-import kotlinx.serialization.json.putJsonObject
 
 /**
  * Text search using IDE's word index.
@@ -59,43 +54,13 @@ class SearchTextTool : AbstractMcpTool() {
         Example: {"query": "ConfigManager"} or {"query": "TODO", "context": "comments"}
     """.trimIndent()
 
-    override val inputSchema: JsonObject = buildJsonObject {
-        put(SchemaConstants.TYPE, SchemaConstants.TYPE_OBJECT)
-        putJsonObject(SchemaConstants.PROPERTIES) {
-            putJsonObject(ParamNames.PROJECT_PATH) {
-                put(SchemaConstants.TYPE, SchemaConstants.TYPE_STRING)
-                put(SchemaConstants.DESCRIPTION, SchemaConstants.DESC_PROJECT_PATH)
-            }
-            putJsonObject(ParamNames.QUERY) {
-                put(SchemaConstants.TYPE, SchemaConstants.TYPE_STRING)
-                put(SchemaConstants.DESCRIPTION, "Exact word to search for (not a pattern/regex).")
-            }
-            putJsonObject(ParamNames.CONTEXT) {
-                put(SchemaConstants.TYPE, SchemaConstants.TYPE_STRING)
-                put(
-                    SchemaConstants.DESCRIPTION,
-                    "Where to search: \"code\", \"comments\", \"strings\", \"all\". Default: \"all\"."
-                )
-                putJsonArray("enum") {
-                    add(JsonPrimitive("code"))
-                    add(JsonPrimitive("comments"))
-                    add(JsonPrimitive("strings"))
-                    add(JsonPrimitive("all"))
-                }
-            }
-            putJsonObject(ParamNames.CASE_SENSITIVE) {
-                put(SchemaConstants.TYPE, SchemaConstants.TYPE_BOOLEAN)
-                put(SchemaConstants.DESCRIPTION, "Case sensitive search. Default: true.")
-            }
-            putJsonObject(ParamNames.LIMIT) {
-                put(SchemaConstants.TYPE, SchemaConstants.TYPE_INTEGER)
-                put(SchemaConstants.DESCRIPTION, "Maximum results to return. Default: 100, Max: 500.")
-            }
-        }
-        putJsonArray(SchemaConstants.REQUIRED) {
-            add(JsonPrimitive(ParamNames.QUERY))
-        }
-    }
+    override val inputSchema: JsonObject = SchemaBuilder.tool()
+        .projectPath()
+        .stringProperty(ParamNames.QUERY, "Exact word to search for (not a pattern/regex).", required = true)
+        .enumProperty(ParamNames.CONTEXT, "Where to search: \"code\", \"comments\", \"strings\", \"all\". Default: \"all\".", listOf("code", "comments", "strings", "all"))
+        .booleanProperty(ParamNames.CASE_SENSITIVE, "Case sensitive search. Default: true.")
+        .intProperty(ParamNames.LIMIT, "Maximum results to return. Default: 100, Max: 500.")
+        .build()
 
     override suspend fun doExecute(project: Project, arguments: JsonObject): ToolCallResult {
         val query = arguments[ParamNames.QUERY]?.jsonPrimitive?.content

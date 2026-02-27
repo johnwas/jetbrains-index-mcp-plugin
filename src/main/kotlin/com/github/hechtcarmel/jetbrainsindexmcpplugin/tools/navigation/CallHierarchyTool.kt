@@ -6,16 +6,12 @@ import com.github.hechtcarmel.jetbrainsindexmcpplugin.server.models.ToolCallResu
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.AbstractMcpTool
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.models.CallElement
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.models.CallHierarchyResult
+import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.schema.SchemaBuilder
 import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.project.Project
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.put
-import kotlinx.serialization.json.putJsonArray
-import kotlinx.serialization.json.putJsonObject
 
 /**
  * Tool for analyzing method call relationships across multiple languages.
@@ -42,45 +38,13 @@ class CallHierarchyTool : AbstractMcpTool() {
         Example: {"file": "src/Service.java", "line": 42, "column": 10, "direction": "callers"}
     """.trimIndent()
 
-    override val inputSchema: JsonObject = buildJsonObject {
-        put("type", "object")
-        putJsonObject("properties") {
-            putJsonObject("project_path") {
-                put("type", "string")
-                put("description", "Absolute path to the project root. Required when multiple projects are open.")
-            }
-            putJsonObject("file") {
-                put("type", "string")
-                put("description", "Path to the file relative to project root")
-            }
-            putJsonObject("line") {
-                put("type", "integer")
-                put("description", "1-based line number")
-            }
-            putJsonObject("column") {
-                put("type", "integer")
-                put("description", "1-based column number")
-            }
-            putJsonObject("direction") {
-                put("type", "string")
-                put("description", "Direction: 'callers' (methods that call this method) or 'callees' (methods this method calls)")
-                putJsonArray("enum") {
-                    add(JsonPrimitive("callers"))
-                    add(JsonPrimitive("callees"))
-                }
-            }
-            putJsonObject("depth") {
-                put("type", "integer")
-                put("description", "How many levels deep to traverse the call hierarchy (default: 3, max: 5)")
-            }
-        }
-        putJsonArray("required") {
-            add(JsonPrimitive("file"))
-            add(JsonPrimitive("line"))
-            add(JsonPrimitive("column"))
-            add(JsonPrimitive("direction"))
-        }
-    }
+    override val inputSchema: JsonObject = SchemaBuilder.tool()
+        .projectPath()
+        .file()
+        .lineAndColumn()
+        .enumProperty("direction", "Direction: 'callers' (methods that call this method) or 'callees' (methods this method calls)", listOf("callers", "callees"), required = true)
+        .intProperty("depth", "How many levels deep to traverse the call hierarchy (default: 3, max: 5)")
+        .build()
 
     companion object {
         private const val DEFAULT_DEPTH = 3

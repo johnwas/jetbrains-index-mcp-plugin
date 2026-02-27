@@ -16,7 +16,7 @@ import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.navigation.SearchTex
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.project.GetIndexStatusTool
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.project.SyncFilesTool
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.refactoring.RenameSymbolTool
-import com.github.hechtcarmel.jetbrainsindexmcpplugin.util.JavaPluginDetector
+import com.github.hechtcarmel.jetbrainsindexmcpplugin.util.PluginDetectors
 import com.intellij.openapi.diagnostic.logger
 import java.util.concurrent.ConcurrentHashMap
 
@@ -69,7 +69,7 @@ import java.util.concurrent.ConcurrentHashMap
  *
  * @see McpTool
  * @see McpServerService
- * @see JavaPluginDetector
+ * @see PluginDetectors
  */
 class ToolRegistry {
 
@@ -175,7 +175,7 @@ class ToolRegistry {
         registerLanguageNavigationTools()
 
         // Java-specific refactoring tools - only available when Java plugin is present
-        if (JavaPluginDetector.isJavaPluginAvailable) {
+        if (PluginDetectors.java.isAvailable) {
             registerJavaRefactoringTools()
         }
 
@@ -233,6 +233,20 @@ class ToolRegistry {
         LOG.info("Registered universal tools (available in all JetBrains IDEs)")
     }
 
+    private data class ConditionalTool(
+        val className: String,
+        val isAvailable: () -> Boolean
+    )
+
+    private val languageNavigationTools = listOf(
+        ConditionalTool("com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.navigation.TypeHierarchyTool") { LanguageHandlerRegistry.hasTypeHierarchyHandlers() },
+        ConditionalTool("com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.navigation.FindImplementationsTool") { LanguageHandlerRegistry.hasImplementationsHandlers() },
+        ConditionalTool("com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.navigation.CallHierarchyTool") { LanguageHandlerRegistry.hasCallHierarchyHandlers() },
+        ConditionalTool("com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.navigation.FindSymbolTool") { LanguageHandlerRegistry.hasSymbolSearchHandlers() },
+        ConditionalTool("com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.navigation.FindSuperMethodsTool") { LanguageHandlerRegistry.hasSuperMethodsHandlers() },
+        ConditionalTool("com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.navigation.FileStructureTool") { LanguageHandlerRegistry.hasStructureHandlers() },
+    )
+
     /**
      * Registers language-specific navigation tools.
      *
@@ -243,46 +257,15 @@ class ToolRegistry {
      * for the tool's functionality.
      */
     private fun registerLanguageNavigationTools() {
-        try {
-            // Type hierarchy - requires at least one TypeHierarchyHandler
-            if (LanguageHandlerRegistry.hasTypeHierarchyHandlers()) {
-                val toolClass = Class.forName("com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.navigation.TypeHierarchyTool")
-                register(toolClass.getDeclaredConstructor().newInstance() as McpTool)
+        for (tool in languageNavigationTools) {
+            try {
+                if (tool.isAvailable()) {
+                    val toolClass = Class.forName(tool.className)
+                    register(toolClass.getDeclaredConstructor().newInstance() as McpTool)
+                }
+            } catch (e: Exception) {
+                LOG.warn("Failed to register language navigation tool ${tool.className}: ${e.message}")
             }
-
-            // Find implementations - requires at least one ImplementationsHandler
-            if (LanguageHandlerRegistry.hasImplementationsHandlers()) {
-                val toolClass = Class.forName("com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.navigation.FindImplementationsTool")
-                register(toolClass.getDeclaredConstructor().newInstance() as McpTool)
-            }
-
-            // Call hierarchy - requires at least one CallHierarchyHandler
-            if (LanguageHandlerRegistry.hasCallHierarchyHandlers()) {
-                val toolClass = Class.forName("com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.navigation.CallHierarchyTool")
-                register(toolClass.getDeclaredConstructor().newInstance() as McpTool)
-            }
-
-            // Find symbol - requires at least one SymbolSearchHandler
-            if (LanguageHandlerRegistry.hasSymbolSearchHandlers()) {
-                val toolClass = Class.forName("com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.navigation.FindSymbolTool")
-                register(toolClass.getDeclaredConstructor().newInstance() as McpTool)
-            }
-
-            // Find super methods - requires at least one SuperMethodsHandler
-            if (LanguageHandlerRegistry.hasSuperMethodsHandlers()) {
-                val toolClass = Class.forName("com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.navigation.FindSuperMethodsTool")
-                register(toolClass.getDeclaredConstructor().newInstance() as McpTool)
-            }
-
-            // File structure - requires at least one StructureHandler
-            if (LanguageHandlerRegistry.hasStructureHandlers()) {
-                val toolClass = Class.forName("com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.navigation.FileStructureTool")
-                register(toolClass.getDeclaredConstructor().newInstance() as McpTool)
-            }
-
-            LOG.info("Registered language navigation tools")
-        } catch (e: Exception) {
-            LOG.warn("Failed to register language navigation tools: ${e.message}")
         }
     }
 
@@ -295,24 +278,21 @@ class ToolRegistry {
      * Note: RenameSymbolTool has been moved to registerUniversalTools() as it
      * now uses the platform-level RenameProcessor which works across all languages.
      *
-     * IMPORTANT: This method must only be called after checking [JavaPluginDetector.isJavaPluginAvailable]
+     * IMPORTANT: This method must only be called after checking [PluginDetectors.java.isAvailable]
      */
     private fun registerJavaRefactoringTools() {
-        try {
-            val refactoringToolClasses = listOf(
-                // RenameSymbolTool moved to registerUniversalTools() - now language-agnostic
-                "com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.refactoring.SafeDeleteTool"
-            )
+        val refactoringToolClasses = listOf(
+            "com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.refactoring.SafeDeleteTool"
+        )
 
-            for (className in refactoringToolClasses) {
+        for (className in refactoringToolClasses) {
+            try {
                 val toolClass = Class.forName(className)
                 val tool = toolClass.getDeclaredConstructor().newInstance() as McpTool
                 register(tool)
+            } catch (e: Exception) {
+                LOG.warn("Failed to register Java refactoring tool $className: ${e.message}")
             }
-
-            LOG.info("Registered Java-specific refactoring tools")
-        } catch (e: Exception) {
-            LOG.warn("Failed to register Java refactoring tools: ${e.message}")
         }
     }
 }

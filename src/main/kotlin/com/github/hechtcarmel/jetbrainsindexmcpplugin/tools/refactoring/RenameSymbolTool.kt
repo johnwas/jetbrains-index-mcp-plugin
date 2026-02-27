@@ -3,6 +3,7 @@ package com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.refactoring
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.server.models.ToolCallResult
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.AbstractMcpTool
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.models.RefactoringResult
+import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.schema.SchemaBuilder
 import com.intellij.lang.LanguageNamesValidation
 import com.intellij.openapi.application.EDT
 import com.intellij.openapi.fileEditor.FileDocumentManager
@@ -18,13 +19,8 @@ import com.intellij.util.containers.MultiMap
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.put
-import kotlinx.serialization.json.putJsonArray
-import kotlinx.serialization.json.putJsonObject
 
 /**
  * Universal rename tool that works across all languages supported by JetBrains IDEs.
@@ -57,37 +53,12 @@ class RenameSymbolTool : AbstractMcpTool() {
         Example: {"file": "src/UserService.java", "line": 15, "column": 18, "newName": "CustomerService"}
     """.trimIndent()
 
-    override val inputSchema: JsonObject = buildJsonObject {
-        put("type", "object")
-        putJsonObject("properties") {
-            putJsonObject("project_path") {
-                put("type", "string")
-                put("description", "Absolute path to project root. Only needed when multiple projects are open.")
-            }
-            putJsonObject("file") {
-                put("type", "string")
-                put("description", "Path to file relative to project root. REQUIRED.")
-            }
-            putJsonObject("line") {
-                put("type", "integer")
-                put("description", "1-based line number where the symbol is located. REQUIRED.")
-            }
-            putJsonObject("column") {
-                put("type", "integer")
-                put("description", "1-based column number. REQUIRED.")
-            }
-            putJsonObject("newName") {
-                put("type", "string")
-                put("description", "The new name for the symbol. REQUIRED.")
-            }
-        }
-        putJsonArray("required") {
-            add(JsonPrimitive("file"))
-            add(JsonPrimitive("line"))
-            add(JsonPrimitive("column"))
-            add(JsonPrimitive("newName"))
-        }
-    }
+    override val inputSchema: JsonObject = SchemaBuilder.tool()
+        .projectPath()
+        .file(description = "Path to file relative to project root. REQUIRED.")
+        .lineAndColumn()
+        .stringProperty("newName", "The new name for the symbol. REQUIRED.", required = true)
+        .build()
 
     /**
      * Data class holding validated rename parameters from Phase 1.

@@ -2,12 +2,12 @@ package com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.navigation
 
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.handlers.createFilteredScope
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.constants.ParamNames
-import com.github.hechtcarmel.jetbrainsindexmcpplugin.constants.SchemaConstants
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.constants.ToolNames
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.server.models.ToolCallResult
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.AbstractMcpTool
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.models.FileMatch
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.models.FindFileResult
+import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.schema.SchemaBuilder
 import com.intellij.navigation.ChooseByNameContributor
 import com.intellij.navigation.ChooseByNameContributorEx
 import com.intellij.navigation.NavigationItem
@@ -20,14 +20,9 @@ import com.intellij.psi.codeStyle.NameUtil
 import com.intellij.psi.search.GlobalSearchScope
 import com.intellij.util.indexing.FindSymbolParameters
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.boolean
-import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.put
-import kotlinx.serialization.json.putJsonArray
-import kotlinx.serialization.json.putJsonObject
 
 /**
  * Tool for searching files by name.
@@ -59,30 +54,12 @@ class FindFileTool : AbstractMcpTool() {
         Example: {"query": "UserService.java"} or {"query": "*Test.kt"} or {"query": "BG"} (matches build.gradle)
     """.trimIndent()
 
-    override val inputSchema: JsonObject = buildJsonObject {
-        put(SchemaConstants.TYPE, SchemaConstants.TYPE_OBJECT)
-        putJsonObject(SchemaConstants.PROPERTIES) {
-            putJsonObject(ParamNames.PROJECT_PATH) {
-                put(SchemaConstants.TYPE, SchemaConstants.TYPE_STRING)
-                put(SchemaConstants.DESCRIPTION, SchemaConstants.DESC_PROJECT_PATH)
-            }
-            putJsonObject(ParamNames.QUERY) {
-                put(SchemaConstants.TYPE, SchemaConstants.TYPE_STRING)
-                put(SchemaConstants.DESCRIPTION, "File name pattern. Supports substring and fuzzy matching.")
-            }
-            putJsonObject(ParamNames.INCLUDE_LIBRARIES) {
-                put(SchemaConstants.TYPE, SchemaConstants.TYPE_BOOLEAN)
-                put(SchemaConstants.DESCRIPTION, "Include files from library dependencies. Default: false.")
-            }
-            putJsonObject(ParamNames.LIMIT) {
-                put(SchemaConstants.TYPE, SchemaConstants.TYPE_INTEGER)
-                put(SchemaConstants.DESCRIPTION, "Maximum results to return. Default: 25, Max: 100.")
-            }
-        }
-        putJsonArray(SchemaConstants.REQUIRED) {
-            add(JsonPrimitive(ParamNames.QUERY))
-        }
-    }
+    override val inputSchema: JsonObject = SchemaBuilder.tool()
+        .projectPath()
+        .stringProperty(ParamNames.QUERY, "File name pattern. Supports substring and fuzzy matching.", required = true)
+        .booleanProperty(ParamNames.INCLUDE_LIBRARIES, "Include files from library dependencies. Default: false.")
+        .intProperty(ParamNames.LIMIT, "Maximum results to return. Default: 25, Max: 100.")
+        .build()
 
     override suspend fun doExecute(project: Project, arguments: JsonObject): ToolCallResult {
         val query = arguments[ParamNames.QUERY]?.jsonPrimitive?.content

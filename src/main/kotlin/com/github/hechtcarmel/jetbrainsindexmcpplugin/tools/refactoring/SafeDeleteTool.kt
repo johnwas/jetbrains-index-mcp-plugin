@@ -2,6 +2,7 @@ package com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.refactoring
 
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.server.models.ToolCallResult
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.models.RefactoringResult
+import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.schema.SchemaBuilder
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.util.PsiUtils
 import com.intellij.openapi.application.EDT
 import com.intellij.openapi.command.WriteCommandAction
@@ -27,7 +28,6 @@ import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
-import kotlinx.serialization.json.putJsonObject
 
 /**
  * Safe delete tool that checks for usages before deletion.
@@ -60,46 +60,26 @@ class SafeDeleteTool : AbstractRefactoringTool() {
         - File: {"file": "src/UnusedUtils.java", "target_type": "file"}
     """.trimIndent()
 
-    override val inputSchema: JsonObject = buildJsonObject {
-        put("type", "object")
-        // Note: Conditional requirements (line/column required for symbol mode) are validated at runtime.
-        // We use a simple schema here because Anthropic's API doesn't support oneOf/allOf/anyOf.
-        putJsonArray("required") {
-            add(JsonPrimitive("file"))
-        }
-        putJsonObject("properties") {
-            putJsonObject("project_path") {
-                put("type", "string")
-                put("description", "Absolute path to project root. Only needed when multiple projects are open.")
+    override val inputSchema: JsonObject = SchemaBuilder.tool()
+        .projectPath()
+        .file(description = "Path to file relative to project root. REQUIRED.")
+        .intProperty("line", "1-based line number where the symbol is located. REQUIRED when target_type='symbol' (default).")
+        .intProperty("column", "1-based column number. REQUIRED when target_type='symbol' (default).")
+        .property("target_type", buildJsonObject {
+            put("type", "string")
+            putJsonArray("enum") {
+                add(JsonPrimitive("symbol"))
+                add(JsonPrimitive("file"))
             }
-            putJsonObject("file") {
-                put("type", "string")
-                put("description", "Path to file relative to project root. REQUIRED.")
-            }
-            putJsonObject("line") {
-                put("type", "integer")
-                put("description", "1-based line number where the symbol is located. REQUIRED when target_type='symbol' (default).")
-            }
-            putJsonObject("column") {
-                put("type", "integer")
-                put("description", "1-based column number. REQUIRED when target_type='symbol' (default).")
-            }
-            putJsonObject("target_type") {
-                put("type", "string")
-                putJsonArray("enum") {
-                    add(JsonPrimitive("symbol"))
-                    add(JsonPrimitive("file"))
-                }
-                put("default", "symbol")
-                put("description", "What to delete: 'symbol' (default, requires line+column) or 'file' (deletes entire file if no external usages).")
-            }
-            putJsonObject("force") {
-                put("type", "boolean")
-                put("default", false)
-                put("description", "Force deletion even if usages exist. Default: false. Use with caution!")
-            }
-        }
-    }
+            put("default", "symbol")
+            put("description", "What to delete: 'symbol' (default, requires line+column) or 'file' (deletes entire file if no external usages).")
+        })
+        .property("force", buildJsonObject {
+            put("type", "boolean")
+            put("default", false)
+            put("description", "Force deletion even if usages exist. Default: false. Use with caution!")
+        })
+        .build()
 
     /**
      * Data class to hold all information collected in background for symbol delete operation.

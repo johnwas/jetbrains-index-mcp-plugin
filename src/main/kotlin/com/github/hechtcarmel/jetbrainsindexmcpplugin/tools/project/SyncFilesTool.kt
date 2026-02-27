@@ -4,6 +4,7 @@ import com.github.hechtcarmel.jetbrainsindexmcpplugin.constants.ToolNames
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.server.models.ToolCallResult
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.AbstractMcpTool
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.models.SyncFilesResult
+import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.schema.SchemaBuilder
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.util.ProjectUtils
 import com.intellij.openapi.application.EDT
 import com.intellij.openapi.project.Project
@@ -13,7 +14,6 @@ import com.intellij.psi.PsiDocumentManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonPrimitive
@@ -33,23 +33,16 @@ class SyncFilesTool : AbstractMcpTool() {
         Example: {} or {"paths": ["src/main/java/com/example/NewFile.java", "src/main/java/com/example/ModifiedFile.java"]}
     """.trimIndent()
 
-    override val inputSchema: JsonObject = buildJsonObject {
-        put("type", "object")
-        putJsonObject("properties") {
-            putJsonObject("project_path") {
+    override val inputSchema: JsonObject = SchemaBuilder.tool()
+        .projectPath()
+        .property("paths", buildJsonObject {
+            put("type", "array")
+            putJsonObject("items") {
                 put("type", "string")
-                put("description", "Absolute path to the project root. Required when multiple projects are open.")
             }
-            putJsonObject("paths") {
-                put("type", "array")
-                putJsonObject("items") {
-                    put("type", "string")
-                }
-                put("description", "File or directory paths relative to project root to sync. If omitted, syncs the entire project.")
-            }
-        }
-        put("required", buildJsonArray { })
-    }
+            put("description", "File or directory paths relative to project root to sync. If omitted, syncs the entire project.")
+        })
+        .build()
 
     override suspend fun doExecute(project: Project, arguments: JsonObject): ToolCallResult {
         val basePath = project.basePath

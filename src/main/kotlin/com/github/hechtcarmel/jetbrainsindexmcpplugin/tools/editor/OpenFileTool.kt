@@ -4,17 +4,13 @@ import com.github.hechtcarmel.jetbrainsindexmcpplugin.constants.ToolNames
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.server.models.ToolCallResult
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.AbstractMcpTool
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.models.OpenFileResult
+import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.schema.SchemaBuilder
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.OpenFileDescriptor
 import com.intellij.openapi.project.Project
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.put
-import kotlinx.serialization.json.putJsonArray
-import kotlinx.serialization.json.putJsonObject
 
 class OpenFileTool : AbstractMcpTool() {
 
@@ -30,30 +26,12 @@ class OpenFileTool : AbstractMcpTool() {
         Example: {"file": "src/Main.kt"} or {"file": "src/Main.kt", "line": 42, "column": 10}
     """.trimIndent()
 
-    override val inputSchema: JsonObject = buildJsonObject {
-        put("type", "object")
-        putJsonObject("properties") {
-            putJsonObject("project_path") {
-                put("type", "string")
-                put("description", "Absolute path to the project root. Required when multiple projects are open.")
-            }
-            putJsonObject("file") {
-                put("type", "string")
-                put("description", "File path relative to project root, or absolute path.")
-            }
-            putJsonObject("line") {
-                put("type", "integer")
-                put("description", "1-based line number to navigate to.")
-            }
-            putJsonObject("column") {
-                put("type", "integer")
-                put("description", "1-based column number to navigate to. Requires line to be specified.")
-            }
-        }
-        putJsonArray("required") {
-            add(JsonPrimitive("file"))
-        }
-    }
+    override val inputSchema: JsonObject = SchemaBuilder.tool()
+        .projectPath()
+        .file(description = "File path relative to project root, or absolute path.")
+        .intProperty("line", "1-based line number to navigate to.")
+        .intProperty("column", "1-based column number to navigate to. Requires line to be specified.")
+        .build()
 
     override suspend fun doExecute(project: Project, arguments: JsonObject): ToolCallResult {
         val filePath = arguments["file"]?.jsonPrimitive?.content

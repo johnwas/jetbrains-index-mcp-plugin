@@ -6,16 +6,13 @@ import com.github.hechtcarmel.jetbrainsindexmcpplugin.server.models.ToolCallResu
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.AbstractMcpTool
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.models.TypeElement
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.models.TypeHierarchyResult
+import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.schema.SchemaBuilder
 import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.project.Project
 import com.intellij.psi.PsiElement
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.put
-import kotlinx.serialization.json.putJsonArray
-import kotlinx.serialization.json.putJsonObject
 
 /**
  * Tool for retrieving type hierarchies across multiple languages.
@@ -42,34 +39,13 @@ class TypeHierarchyTool : AbstractMcpTool() {
         Example: {"className": "com.example.UserService"} or {"file": "src/MyClass.java", "line": 10, "column": 14}
     """.trimIndent()
 
-    override val inputSchema: JsonObject = buildJsonObject {
-        put("type", "object")
-        putJsonObject("properties") {
-            putJsonObject("project_path") {
-                put("type", "string")
-                put("description", "Absolute path to project root. Only needed when multiple projects are open in IDE.")
-            }
-            putJsonObject("className") {
-                put("type", "string")
-                put("description", "Fully qualified class name (e.g., 'com.example.MyClass' for Java or 'App\\\\Models\\\\User' for PHP). RECOMMENDED - use this if you know the class name.")
-            }
-            putJsonObject("file") {
-                put("type", "string")
-                put("description", "Path to file relative to project root (e.g., 'src/main/java/com/example/MyClass.java'). Use with line and column.")
-            }
-            putJsonObject("line") {
-                put("type", "integer")
-                put("description", "1-based line number where the class is defined. Required if using file parameter.")
-            }
-            putJsonObject("column") {
-                put("type", "integer")
-                put("description", "1-based column number. Required if using file parameter.")
-            }
-        }
-        putJsonArray("required") {
-            // Empty because either className OR (file+line+column) must be provided
-        }
-    }
+    override val inputSchema: JsonObject = SchemaBuilder.tool()
+        .projectPath()
+        .stringProperty("className", "Fully qualified class name (e.g., 'com.example.MyClass' for Java or 'App\\\\Models\\\\User' for PHP). RECOMMENDED - use this if you know the class name.")
+        .file(required = false, description = "Path to file relative to project root (e.g., 'src/main/java/com/example/MyClass.java'). Use with line and column.")
+        .intProperty("line", "1-based line number where the class is defined. Required if using file parameter.")
+        .intProperty("column", "1-based column number. Required if using file parameter.")
+        .build()
 
     override suspend fun doExecute(project: Project, arguments: JsonObject): ToolCallResult {
         requireSmartMode(project)
