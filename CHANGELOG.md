@@ -4,6 +4,11 @@
 
 ## [Unreleased]
 
+## [3.10.1] - 2026-02-27
+
+### Fixed
+- **`ide_find_definition` crash in PhpStorm and other non-Java IDEs**
+
 ## [3.10.0] - 2026-02-22
 
 ### Added
