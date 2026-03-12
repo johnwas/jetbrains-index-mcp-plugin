@@ -11,6 +11,8 @@ import com.intellij.psi.PsiFile
 import com.intellij.psi.PsiManager
 import com.intellij.psi.PsiNamedElement
 import com.intellij.psi.PsiReference
+import java.nio.file.InvalidPathException
+import java.nio.file.Path
 
 object PsiUtils {
 
@@ -107,9 +109,7 @@ object PsiUtils {
 
     fun getVirtualFile(project: Project, relativePath: String): VirtualFile? {
         val basePath = project.basePath ?: return null
-        val fullPath = if (relativePath.startsWith("/")) relativePath else "$basePath/$relativePath"
-        // Use refreshAndFindFileByPath to handle externally created files
-        return LocalFileSystem.getInstance().refreshAndFindFileByPath(fullPath)
+        return resolveLocalFile(relativePath, sequenceOf(basePath))
     }
 
     fun resolveVirtualFileAnywhere(project: Project, path: String): VirtualFile? {
@@ -127,24 +127,9 @@ object PsiUtils {
                 val jarPath = parts[0]
                 val internalPath = parts[1]
                 
-                // Normalize the jar file path to absolute path
-                val absoluteJarPath = when {
-                    jarPath.startsWith("/") -> jarPath
-                    jarPath.startsWith("~") -> {
-                        val homeDir = System.getProperty("user.home")
-                        jarPath.replaceFirst("~", homeDir)
-                    }
-                    else -> {
-                        // Try as relative to project first
-                        val basePath = project.basePath
-                        if (basePath != null) {
-                            "$basePath/$jarPath"
-                        } else {
-                            // Try as absolute path without leading /
-                            "/$jarPath"
-                        }
-                    }
-                }
+                val homeExpandedJarPath = expandHome(jarPath)
+                val absoluteJarPath = resolveAbsolutePathString(homeExpandedJarPath, listOfNotNull(project.basePath).asSequence())
+                    ?: homeExpandedJarPath
                 
                 // Construct the jar URL: jar://absolute/path/to/file.jar!/internal/path
                 val jarUrl = "jar://$absoluteJarPath!/$internalPath"
@@ -154,6 +139,48 @@ object PsiUtils {
         }
 
         return getVirtualFile(project, path)
+    }
+
+    fun resolveLocalFile(path: String, rootCandidates: Sequence<String>): VirtualFile? {
+        val expandedPath = expandHome(path)
+        // resolveAbsolutePath handles both absolute paths and relative paths against each root candidate.
+        val absolutePath = resolveAbsolutePath(expandedPath, rootCandidates) ?: return null
+        return LocalFileSystem.getInstance().refreshAndFindFileByNioFile(absolutePath)
+    }
+
+    fun resolveAbsolutePath(path: String, rootCandidates: Sequence<String> = emptySequence()): Path? {
+        val candidate = toPathOrNull(path) ?: return null
+        if (candidate.isAbsolute) return candidate.normalize()
+
+        for (root in rootCandidates) {
+            val resolved = resolveAgainstRoot(path, root)
+            if (resolved != null) return resolved
+        }
+        return null
+    }
+
+    fun resolveAbsolutePathString(path: String, rootCandidates: Sequence<String> = emptySequence()): String? =
+        resolveAbsolutePath(path, rootCandidates)?.toString()?.replace('\\', '/')
+
+    private fun resolveAgainstRoot(path: String, root: String?): Path? {
+        val rootPath = toPathOrNull(root) ?: return null
+        val relativePath = toPathOrNull(path) ?: return null
+        return rootPath.resolve(relativePath).normalize()
+    }
+
+    private fun toPathOrNull(path: String?): Path? {
+        if (path.isNullOrBlank()) return null
+        return try {
+            Path.of(path)
+        } catch (_: InvalidPathException) {
+            null
+        }
+    }
+
+    private fun expandHome(path: String): String {
+        if (!path.startsWith("~")) return path
+        val homeDir = System.getProperty("user.home") ?: return path
+        return path.replaceFirst("~", homeDir)
     }
 
     fun getFileContent(project: Project, virtualFile: VirtualFile): String? {

@@ -4,6 +4,38 @@
 
 ## [Unreleased]
 
+### Changed
+- **Refactored path resolution in `PsiUtils`** — Extracted `resolveLocalFile`, `resolveAbsolutePath`, `resolveAbsolutePathString`, `expandHome`, and `toPathOrNull` as reusable helpers, eliminating duplicated path normalization logic
+
+### Fixed
+- **Integration test used real filesystem** — `ToolExecutionIntegrationTest` now uses `myFixture.addFileToProject()` so test files are properly indexed by the in-memory VFS
+- **Path comparison failed on Windows** — `PsiUtilsTest` now normalizes path separators and casing before comparing, fixing test failures on Windows
+
+## [4.0.0] - 2026-03-11
+
+### Added
+- **Primary transport changed** — Default server URL now points to Streamable HTTP endpoint (`/index-mcp/streamable-http`). Existing client configurations using the SSE URL continue to work but should be updated.
+
+## [3.14.0] - 2026-03-11
+
+### Added
+- **Configurable server host** — Allows the user to configure the listening server host, making it possible to use the MCP server on another machine or WSL (Windows Subsystem for Linux).
+
+## [3.13.0] - 2026-03-03
+
+### Added
+- **`ide_reformat_code` tool** — Reformat code files using the IDE's code style settings (`.editorconfig`, project code style). Equivalent to the IDE's "Reformat Code" action (Ctrl+Alt+L / ⌘⌥L). Supports optional import optimization (`optimizeImports`, default: true), code rearrangement (`rearrangeCode`, default: true), and partial file formatting via `startLine`/`endLine`. Disabled by default — enable in Settings → Tools → Index MCP Server. ([#76](https://github.com/hechtcarmel/jetbrains-index-mcp-plugin/issues/76))
+
+## [3.12.2] - 2026-03-03
+
+### Fixed
+- **Tool filter dropdown in tool window was outdated**
+
+## [3.12.1] - 2026-03-03
+
+### Fixed
+- **Server stuck on "Initializing..." if `postStartupActivity` doesn't fire** — The MCP server now self-initializes asynchronously from its service constructor instead of depending solely on `postStartupActivity`. This fixes environments where the startup activity silently fails (e.g., due to plugin conflicts or class-loading errors), leaving the server permanently in "Initializing..." state ([#73](https://github.com/hechtcarmel/jetbrains-index-mcp-plugin/issues/73))
+
 ## [3.12.0] - 2026-03-01
 
 ### Added
