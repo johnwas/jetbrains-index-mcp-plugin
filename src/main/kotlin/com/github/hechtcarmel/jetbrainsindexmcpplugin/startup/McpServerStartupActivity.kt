@@ -19,16 +19,15 @@ class McpServerStartupActivity : ProjectActivity {
         LOG.info("MCP Server startup activity executing for project: ${project.name}")
 
         try {
-            // Initialize the MCP server service (heavy work deferred from init{})
+            // McpServerService self-initializes asynchronously from its constructor (see issue #73).
+            // This call is a redundant safety net — initialize() is idempotent.
             val mcpService = McpServerService.getInstance()
             mcpService.initialize()
             val serverUrl = mcpService.getServerUrl()
             val serverError = mcpService.getServerError()
 
             if (serverError != null) {
-                // Server failed to start (e.g., port in use)
                 LOG.warn("MCP Server failed to start: ${serverError.message}")
-                // Notification is already shown by McpServerService
             } else if (serverUrl != null) {
                 LOG.info("MCP Server available at: $serverUrl")
 

@@ -25,8 +25,36 @@ object ToolNames {
     // Refactoring tools
     const val REFACTOR_RENAME = "ide_refactor_rename"
     const val REFACTOR_SAFE_DELETE = "ide_refactor_safe_delete"
+    const val REFORMAT_CODE = "ide_reformat_code"
 
     // Editor tools
     const val GET_ACTIVE_FILE = "ide_get_active_file"
     const val OPEN_FILE = "ide_open_file"
+
+    /**
+     * All known tool names, sorted alphabetically.
+     * Keep this list in sync when adding or removing tool name constants.
+     */
+    val ALL: List<String> = listOf(
+        CALL_HIERARCHY,
+        DIAGNOSTICS,
+        FILE_STRUCTURE,
+        FIND_CLASS,
+        FIND_DEFINITION,
+        FIND_FILE,
+        FIND_IMPLEMENTATIONS,
+        FIND_REFERENCES,
+        FIND_SUPER_METHODS,
+        FIND_SYMBOL,
+        GET_ACTIVE_FILE,
+        INDEX_STATUS,
+        OPEN_FILE,
+        READ_FILE,
+        REFACTOR_RENAME,
+        REFACTOR_SAFE_DELETE,
+        REFORMAT_CODE,
+        SEARCH_TEXT,
+        SYNC_FILES,
+        TYPE_HIERARCHY
+    )
 }

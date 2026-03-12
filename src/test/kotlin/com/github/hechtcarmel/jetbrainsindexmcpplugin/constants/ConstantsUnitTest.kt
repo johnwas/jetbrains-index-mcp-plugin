@@ -27,6 +27,7 @@ class ConstantsUnitTest : TestCase() {
     fun testToolNamesRefactoringTools() {
         assertEquals("ide_refactor_rename", ToolNames.REFACTOR_RENAME)
         assertEquals("ide_refactor_safe_delete", ToolNames.REFACTOR_SAFE_DELETE)
+        assertEquals("ide_reformat_code", ToolNames.REFORMAT_CODE)
     }
 
     fun testToolNamesEditorTools() {
@@ -35,7 +36,13 @@ class ConstantsUnitTest : TestCase() {
     }
 
     fun testToolNamesHaveIdePrefix() {
-        val toolNames = listOf(
+        ToolNames.ALL.forEach { name ->
+            assertTrue("Tool name '$name' should start with 'ide_'", name.startsWith("ide_"))
+        }
+    }
+
+    fun testToolNamesAllContainsEveryConstant() {
+        val expectedNames = listOf(
             ToolNames.FIND_REFERENCES,
             ToolNames.FIND_DEFINITION,
             ToolNames.TYPE_HIERARCHY,
@@ -43,17 +50,31 @@ class ConstantsUnitTest : TestCase() {
             ToolNames.FIND_IMPLEMENTATIONS,
             ToolNames.FIND_SYMBOL,
             ToolNames.FIND_SUPER_METHODS,
+            ToolNames.FILE_STRUCTURE,
+            ToolNames.FIND_CLASS,
+            ToolNames.FIND_FILE,
+            ToolNames.SEARCH_TEXT,
+            ToolNames.READ_FILE,
             ToolNames.DIAGNOSTICS,
             ToolNames.INDEX_STATUS,
+            ToolNames.SYNC_FILES,
             ToolNames.REFACTOR_RENAME,
             ToolNames.REFACTOR_SAFE_DELETE,
+            ToolNames.REFORMAT_CODE,
             ToolNames.GET_ACTIVE_FILE,
             ToolNames.OPEN_FILE
         )
 
-        toolNames.forEach { name ->
-            assertTrue("Tool name '$name' should start with 'ide_'", name.startsWith("ide_"))
+        for (name in expectedNames) {
+            assertTrue("ToolNames.ALL should contain '$name'", ToolNames.ALL.contains(name))
         }
+        assertEquals("ToolNames.ALL should have exactly ${expectedNames.size} entries",
+            expectedNames.size, ToolNames.ALL.size)
+    }
+
+    fun testToolNamesAllIsSorted() {
+        val sorted = ToolNames.ALL.sorted()
+        assertEquals("ToolNames.ALL should be sorted alphabetically", sorted, ToolNames.ALL)
     }
 
     // JsonRpcMethods tests
@@ -85,6 +106,8 @@ class ConstantsUnitTest : TestCase() {
         assertEquals("startLine", ParamNames.START_LINE)
         assertEquals("endLine", ParamNames.END_LINE)
         assertEquals("force", ParamNames.FORCE)
+        assertEquals("optimizeImports", ParamNames.OPTIMIZE_IMPORTS)
+        assertEquals("rearrangeCode", ParamNames.REARRANGE_CODE)
     }
 
     fun testParamNamesNavigation() {

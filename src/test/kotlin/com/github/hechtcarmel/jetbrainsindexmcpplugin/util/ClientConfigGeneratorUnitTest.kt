@@ -123,7 +123,7 @@ class ClientConfigGeneratorUnitTest : TestCase() {
 
         assertTrue("Should mention settings.json", hint.contains("settings.json"))
         assertTrue("Should mention gemini path", hint.contains(".gemini") || hint.contains("gemini"))
-        assertTrue("Should mention mcp-remote", hint.contains("mcp-remote"))
+        assertTrue("Should mention httpUrl", hint.contains("httpUrl"))
     }
 
     fun testCursorHintContainsConfigPaths() {
@@ -146,19 +146,19 @@ class ClientConfigGeneratorUnitTest : TestCase() {
 
     // Generic hint tests
 
-    fun testGetStandardSseHintMentionsSseTransport() {
-        val hint = ClientConfigGenerator.getStandardSseHint()
+    fun testGetStreamableHttpHintMentionsStreamableHttp() {
+        val hint = ClientConfigGenerator.getStreamableHttpHint()
 
-        assertTrue("Should mention SSE", hint.contains("SSE"))
+        assertTrue("Should mention Streamable HTTP", hint.contains("Streamable HTTP"))
         assertTrue("Should mention transport", hint.contains("transport"))
     }
 
-    fun testGetMcpRemoteHintMentionsMcpRemoteAndStdio() {
-        val hint = ClientConfigGenerator.getMcpRemoteHint()
+    fun testGetLegacySseHintMentionsSseTransport() {
+        val hint = ClientConfigGenerator.getLegacySseHint()
 
-        assertTrue("Should mention mcp-remote", hint.contains("mcp-remote"))
-        assertTrue("Should mention stdio", hint.contains("stdio"))
-        assertTrue("Should mention --allow-http", hint.contains("--allow-http"))
+        assertTrue("Should mention SSE", hint.contains("SSE"))
+        assertTrue("Should mention transport", hint.contains("transport"))
+        assertTrue("Should mention Streamable HTTP", hint.contains("Streamable HTTP"))
     }
 
     // General enum tests
@@ -187,13 +187,13 @@ class ClientConfigGeneratorUnitTest : TestCase() {
 
     fun testBuildClaudeCodeCommandContainsAddCommand() {
         val command = ClientConfigGenerator.buildClaudeCodeCommand(
-            serverUrl = "http://127.0.0.1:63342/index-mcp/sse",
+            serverUrl = "http://127.0.0.1:63342/index-mcp/streamable-http",
             serverName = "test-server"
         )
 
         assertTrue(
             "Command should contain add command",
-            command.contains("claude mcp add --transport sse test-server http://127.0.0.1:63342/index-mcp/sse --scope user")
+            command.contains("claude mcp add --transport http test-server http://127.0.0.1:63342/index-mcp/streamable-http --scope user")
         )
     }
 
@@ -242,7 +242,7 @@ class ClientConfigGeneratorUnitTest : TestCase() {
 
     fun testBuildClaudeCodeCommandWithDifferentServerName() {
         val command = ClientConfigGenerator.buildClaudeCodeCommand(
-            serverUrl = "http://127.0.0.1:12345/mcp/sse",
+            serverUrl = "http://127.0.0.1:12345/mcp/streamable-http",
             serverName = "custom-name"
         )
 
@@ -252,7 +252,7 @@ class ClientConfigGeneratorUnitTest : TestCase() {
         )
         assertTrue(
             "Add command should use custom server name",
-            command.contains("claude mcp add --transport sse custom-name")
+            command.contains("claude mcp add --transport http custom-name")
         )
     }
 
@@ -271,13 +271,13 @@ class ClientConfigGeneratorUnitTest : TestCase() {
 
     fun testBuildClaudeCodeCommandFormat() {
         val command = ClientConfigGenerator.buildClaudeCodeCommand(
-            serverUrl = "http://127.0.0.1:63342/index-mcp/sse",
+            serverUrl = "http://127.0.0.1:63342/index-mcp/streamable-http",
             serverName = "intellij-index"
         )
 
         val expectedCommand = "claude mcp remove jetbrains-index-mcp 2>/dev/null ; " +
             "claude mcp remove intellij-index 2>/dev/null ; " +
-            "claude mcp add --transport sse intellij-index http://127.0.0.1:63342/index-mcp/sse --scope user"
+            "claude mcp add --transport http intellij-index http://127.0.0.1:63342/index-mcp/streamable-http --scope user"
 
         assertEquals(
             "Command format should match expected reinstall pattern with legacy cleanup",
@@ -314,11 +314,14 @@ class ClientConfigGeneratorUnitTest : TestCase() {
 
     fun testBuildCodexCommandContainsAddCommand() {
         val command = ClientConfigGenerator.buildCodexCommand(
-            serverUrl = "http://127.0.0.1:63342/index-mcp/sse",
+            serverUrl = "http://127.0.0.1:63342/index-mcp/streamable-http",
             serverName = "test-server"
         )
 
-
+        assertTrue(
+            "Command should contain add command with --url",
+            command.contains("codex mcp add test-server --url http://127.0.0.1:63342/index-mcp/streamable-http")
+        )
     }
 
     fun testBuildCodexCommandUsesSemicolonSeparator() {
@@ -366,7 +369,7 @@ class ClientConfigGeneratorUnitTest : TestCase() {
 
     fun testBuildCodexCommandWithDifferentServerName() {
         val command = ClientConfigGenerator.buildCodexCommand(
-            serverUrl = "http://127.0.0.1:12345/mcp/sse",
+            serverUrl = "http://127.0.0.1:12345/mcp/streamable-http",
             serverName = "custom-name"
         )
 
@@ -374,11 +377,14 @@ class ClientConfigGeneratorUnitTest : TestCase() {
             "Remove command should use custom server name",
             command.contains("codex mcp remove custom-name")
         )
-
+        assertTrue(
+            "Add command should use custom server name",
+            command.contains("codex mcp add custom-name --url")
+        )
     }
 
     fun testBuildCodexCommandWithDifferentServerUrl() {
-        val customUrl = "http://127.0.0.1:12345/custom-mcp/sse"
+        val customUrl = "http://127.0.0.1:12345/custom-mcp/streamable-http"
         val command = ClientConfigGenerator.buildCodexCommand(
             serverUrl = customUrl,
             serverName = "test-server"
@@ -409,28 +415,19 @@ class ClientConfigGeneratorUnitTest : TestCase() {
         assertTrue(expectedFormat.contains("url"))
     }
 
-    fun testGeminiCliConfigFormatUsesMcpRemote() {
+    fun testGeminiCliConfigFormatUsesHttpUrl() {
         val expectedFormat = """
 {
   "mcpServers": {
     "SERVER_NAME": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "mcp-remote",
-        "SERVER_URL",
-        "--allow-http"
-      ]
+      "httpUrl": "SERVER_URL"
     }
   }
 }
         """.trimIndent()
 
         assertTrue(expectedFormat.contains("mcpServers"))
-        assertTrue(expectedFormat.contains("command"))
-        assertTrue(expectedFormat.contains("npx"))
-        assertTrue(expectedFormat.contains("mcp-remote"))
-        assertTrue(expectedFormat.contains("--allow-http"))
+        assertTrue(expectedFormat.contains("httpUrl"))
     }
 
     fun testStandardSseConfigFormatHasUrlKey() {
@@ -448,28 +445,15 @@ class ClientConfigGeneratorUnitTest : TestCase() {
         assertTrue(expectedFormat.contains("url"))
     }
 
-    fun testMcpRemoteConfigFormatHasCommandAndArgs() {
-        val expectedFormat = """
-{
-  "mcpServers": {
-    "SERVER_NAME": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "mcp-remote",
-        "SERVER_URL",
-        "--allow-http"
-      ]
-    }
-  }
-}
-        """.trimIndent()
+    fun testCodexCommandFormatUsesNativeTransport() {
+        val command = ClientConfigGenerator.buildCodexCommand(
+            serverUrl = "http://127.0.0.1:29170/index-mcp/streamable-http",
+            serverName = "intellij-index"
+        )
 
-        assertTrue(expectedFormat.contains("command"))
-        assertTrue(expectedFormat.contains("args"))
-        assertTrue(expectedFormat.contains("npx"))
-        assertTrue(expectedFormat.contains("mcp-remote"))
-        assertTrue(expectedFormat.contains("-y"))
-        assertTrue(expectedFormat.contains("--allow-http"))
+        assertTrue("Should use native --url", command.contains("--url"))
+        assertFalse("Should not use --transport http", command.contains("--transport http"))
+        assertFalse("Should not use mcp-remote", command.contains("mcp-remote"))
+        assertFalse("Should not use npx", command.contains("npx"))
     }
 }

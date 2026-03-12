@@ -8,7 +8,9 @@ import com.github.hechtcarmel.jetbrainsindexmcpplugin.util.ClassResolver
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.util.ProjectUtils
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.EDT
+import com.intellij.openapi.application.ModalityState
 import com.intellij.openapi.application.ReadAction
+import com.intellij.openapi.application.asContextElement
 import com.intellij.openapi.application.readAction as platformReadAction
 import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.editor.Document
@@ -117,7 +119,7 @@ abstract class AbstractMcpTool : McpTool {
         return if (ApplicationManager.getApplication().isDispatchThread) {
             action()
         } else {
-            withContext(Dispatchers.EDT) { action() }
+            withContext(Dispatchers.EDT + ModalityState.nonModal().asContextElement()) { action() }
         }
     }
 

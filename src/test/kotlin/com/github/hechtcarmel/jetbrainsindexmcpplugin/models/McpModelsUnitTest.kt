@@ -165,7 +165,7 @@ class McpModelsUnitTest : TestCase() {
 
     fun testInitializeResultSerialization() {
         val result = InitializeResult(
-            protocolVersion = "2024-11-05",
+            protocolVersion = "2025-03-26",
             capabilities = ServerCapabilities(),
             serverInfo = ServerInfo("test", "1.0")
         )
@@ -173,7 +173,7 @@ class McpModelsUnitTest : TestCase() {
         val serialized = json.encodeToString(result)
         val deserialized = json.decodeFromString<InitializeResult>(serialized)
 
-        assertEquals("2024-11-05", deserialized.protocolVersion)
+        assertEquals("2025-03-26", deserialized.protocolVersion)
         assertNotNull(deserialized.capabilities)
         assertEquals("test", deserialized.serverInfo.name)
     }

@@ -19,7 +19,7 @@ Create an MCP server within an IntelliJ plugin that allows AI coding assistants 
 - **Build System**: Gradle 9.0 with Kotlin DSL
 - **IDE Platform**: IntelliJ IDEA 2025.1+ (platformType = IC)
 - **HTTP Server**: Ktor CIO 2.3.12 (embedded, configurable port)
-- **Protocol**: Model Context Protocol (MCP) 2024-11-05
+- **Protocol**: Model Context Protocol (MCP) 2025-03-26
 
 ## Key Documentation
 
@@ -33,9 +33,10 @@ Create an MCP server within an IntelliJ plugin that allows AI coding assistants 
 - **Explore API**: https://plugins.jetbrains.com/docs/intellij/explore-api.html
 
 ### Model Context Protocol (MCP)
-- **Specification**: https://spec.modelcontextprotocol.io/specification/2024-11-05/
-- **Tools API**: https://modelcontextprotocol.io/specification/2024-11-05/server/tools
-- **Resources API**: https://modelcontextprotocol.io/specification/2024-11-05/server/resources
+- **Specification**: https://spec.modelcontextprotocol.io/specification/2025-03-26/
+- **Tools API**: https://modelcontextprotocol.io/specification/2025-03-26/server/tools
+- **Resources API**: https://modelcontextprotocol.io/specification/2025-03-26/server/resources
+- **Legacy SSE Transport**: https://spec.modelcontextprotocol.io/specification/2024-11-05/basic/transports/
 - **GitHub**: https://github.com/modelcontextprotocol/modelcontextprotocol
 
 ## Project Structure
@@ -62,7 +63,8 @@ src/
 │   │   │   ├── models/                 # Protocol models (JsonRpc, MCP)
 │   │   │   └── transport/              # HTTP+SSE transport layer
 │   │   │       ├── KtorMcpServer.kt    # Embedded Ktor CIO server
-│   │   │       └── KtorSseSessionManager.kt # SSE session management
+│   │   │       ├── KtorSseSessionManager.kt # SSE session management
+│   │   │       └── StreamableHttpSessionManager.kt # Streamable HTTP session management
 │   │   ├── startup/                    # Startup activities
 │   │   ├── tools/                      # MCP tool implementations
 │   │   │   ├── McpTool.kt             # Tool interface
@@ -148,7 +150,14 @@ MCP servers expose:
 - `KtorSseSessionManager` - SSE session management using Kotlin channels
 - `JsonRpcHandler` - JSON-RPC 2.0 request processing
 
-**Transport**: This plugin uses HTTP+SSE transport with JSON-RPC 2.0:
+**Transport**: This plugin supports two transports with JSON-RPC 2.0:
+
+*Streamable HTTP (Primary, MCP 2025-03-26):*
+- `POST /index-mcp/streamable-http` → JSON-RPC requests/responses with `Mcp-Session-Id` header
+- `GET /index-mcp/streamable-http` → 405 Method Not Allowed
+- `DELETE /index-mcp/streamable-http` → Session termination
+
+*Legacy SSE (MCP 2024-11-05):*
 - `GET /index-mcp/sse` → Opens SSE stream, sends `endpoint` event with POST URL
 - `POST /index-mcp` → JSON-RPC requests/responses
 
@@ -157,7 +166,7 @@ MCP servers expose:
 {
   "mcpServers": {
     "intellij-index": {
-      "url": "http://127.0.0.1:29170/index-mcp/sse"
+      "url": "http://127.0.0.1:29170/index-mcp/streamable-http"
     }
   }
 }
@@ -361,6 +370,7 @@ Tools are organized by IDE availability.
 - `ide_index_status` - Check indexing status (dumb/smart mode)
 - `ide_sync_files` - Force sync IDE's virtual file system and PSI cache with external file changes
 - `ide_refactor_rename` - Rename a symbol across the project with automatic related element renaming (getters/setters, overriding methods). Fully headless, works for ALL languages.
+- `ide_reformat_code` - Reformat code using project code style (.editorconfig, IDE settings). Supports optional import optimization and code rearrangement. (disabled by default)
 - `ide_get_active_file` - Get the currently active file(s) in the editor (disabled by default)
 - `ide_open_file` - Open a file in the editor with optional line/column navigation (disabled by default)
 
