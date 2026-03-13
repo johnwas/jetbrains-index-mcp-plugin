@@ -10,6 +10,7 @@ import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.EDT
 import com.intellij.openapi.application.ModalityState
 import com.intellij.openapi.application.ReadAction
+import com.intellij.openapi.application.TransactionGuard
 import com.intellij.openapi.application.asContextElement
 import com.intellij.openapi.application.readAction as platformReadAction
 import com.intellij.openapi.command.WriteCommandAction
@@ -124,6 +125,30 @@ abstract class AbstractMcpTool : McpTool {
     }
 
     /**
+     * Commits all documents in a write-safe context.
+     *
+     * [PsiDocumentManager.commitAllDocuments] requires a write-safe EDT context
+     * (enforced by [TransactionGuard]). Since MCP tools are invoked from HTTP handlers
+     * (not user actions), there is no inherent write-safe context.
+     * [TransactionGuard.submitTransactionAndWait] explicitly creates one.
+     *
+     * From EDT (e.g. inside [withContext]([Dispatchers.EDT])), falls back to
+     * [WriteCommandAction] which also provides write-safety.
+     */
+    @Suppress("DEPRECATION")
+    protected suspend fun commitDocuments(project: Project) {
+        if (ApplicationManager.getApplication().isDispatchThread) {
+            WriteCommandAction.runWriteCommandAction(project) {
+                PsiDocumentManager.getInstance(project).commitAllDocuments()
+            }
+        } else {
+            TransactionGuard.getInstance().submitTransactionAndWait {
+                PsiDocumentManager.getInstance(project).commitAllDocuments()
+            }
+        }
+    }
+
+    /**
      * Ensures all document changes are committed to PSI before proceeding.
      *
      * This is necessary because external tools (like Claude Code's write tool)
@@ -151,10 +176,8 @@ abstract class AbstractMcpTool : McpTool {
             VfsUtil.markDirtyAndRefresh(true, true, true, *dirsToRefresh.toTypedArray())
         }
 
-        // 2. Commit Documents using suspend function (non-blocking)
-        edtAction {
-            PsiDocumentManager.getInstance(project).commitAllDocuments()
-        }
+        // 2. Commit Documents in a write-safe context
+        commitDocuments(project)
     }
 
     /**
