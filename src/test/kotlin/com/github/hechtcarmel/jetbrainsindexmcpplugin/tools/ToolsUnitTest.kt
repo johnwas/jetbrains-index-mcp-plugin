@@ -18,6 +18,7 @@ import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.navigation.FindUsage
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.navigation.SearchTextTool
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.navigation.TypeHierarchyTool
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.project.GetIndexStatusTool
+import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.project.BuildProjectTool
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.project.SyncFilesTool
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.refactoring.ReformatCodeTool
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.refactoring.RenameSymbolTool
@@ -63,6 +64,35 @@ class ToolsUnitTest : TestCase() {
         val tool = registry.getTool(ToolNames.SYNC_FILES)
         assertNotNull("ide_sync_files should be registered", tool)
         assertEquals(ToolNames.SYNC_FILES, tool?.name)
+    }
+
+    fun testBuildProjectToolSchema() {
+        val tool = BuildProjectTool()
+
+        assertEquals(ToolNames.BUILD_PROJECT, tool.name)
+        assertNotNull(tool.description)
+
+        val schema = tool.inputSchema
+        assertEquals(SchemaConstants.TYPE_OBJECT, schema[SchemaConstants.TYPE]?.jsonPrimitive?.content)
+
+        val properties = schema[SchemaConstants.PROPERTIES]?.jsonObject
+        assertNotNull(properties)
+
+        assertNotNull("Should have project_path property", properties?.get(ParamNames.PROJECT_PATH))
+        assertNotNull("Should have rebuild property", properties?.get(ParamNames.REBUILD))
+        assertNotNull("Should have includeRawOutput property", properties?.get(ParamNames.INCLUDE_RAW_OUTPUT))
+        assertNotNull("Should have timeoutSeconds property", properties?.get(ParamNames.TIMEOUT_SECONDS))
+
+        assertNull("Should not have required array", schema[SchemaConstants.REQUIRED])
+    }
+
+    fun testBuildProjectToolIsRegistered() {
+        val registry = ToolRegistry()
+        registry.registerBuiltInTools()
+
+        val tool = registry.getTool(ToolNames.BUILD_PROJECT)
+        assertNotNull("ide_build_project should be registered", tool)
+        assertEquals(ToolNames.BUILD_PROJECT, tool?.name)
     }
 
     fun testFindUsagesToolSchema() {
@@ -193,7 +223,8 @@ class ToolsUnitTest : TestCase() {
             ToolNames.FIND_DEFINITION,
             ToolNames.DIAGNOSTICS,
             ToolNames.INDEX_STATUS,
-            ToolNames.SYNC_FILES
+            ToolNames.SYNC_FILES,
+            ToolNames.BUILD_PROJECT
         )
 
         // Universal tools should always be registered
@@ -212,7 +243,7 @@ class ToolsUnitTest : TestCase() {
             assertNotNull("Editor tool $toolName should be registered", tool)
         }
 
-        assertTrue("Should have at least 7 universal tools", registry.getAllTools().size >= 7)
+        assertTrue("Should have at least 8 universal tools", registry.getAllTools().size >= 8)
     }
 
     /**

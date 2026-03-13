@@ -4,6 +4,11 @@
 
 ## [Unreleased]
 
+## [4.1.0] - 2026-03-13
+### Added
+- **`ide_build_project` tool** — Trigger project builds via the IDE's build system (JPS, Gradle, Maven). Returns structured error/warning messages with file locations. Supports workspace sub-projects, trusted-project security gate, optional timeout, and optional raw build output. Disabled by default — enable in Settings → Tools → Index MCP Server.
+- **Plugin description updates** - Aligned with missing tools and features.
+
 ## [4.0.2] - 2026-03-13
 ### Changed
 - **Refactored path resolution in `PsiUtils`** — Extracted `resolveLocalFile`, `resolveAbsolutePath`, `resolveAbsolutePathString`, `expandHome`, and `toPathOrNull` as reusable helpers, eliminating duplicated path normalization logic

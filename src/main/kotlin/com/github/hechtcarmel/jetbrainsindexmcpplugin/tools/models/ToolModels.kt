@@ -153,6 +153,28 @@ data class SyncFilesResult(
     val message: String
 )
 
+// ide_build_project output
+@Serializable
+data class BuildMessage(
+    val category: String,
+    val message: String,
+    val file: String? = null,
+    val line: Int? = null,
+    val column: Int? = null
+)
+
+@Serializable
+data class BuildProjectResult(
+    val success: Boolean,
+    val aborted: Boolean = false,
+    val errors: Int? = null,
+    val warnings: Int? = null,
+    val buildMessages: List<BuildMessage>,
+    val truncated: Boolean = false,
+    val rawOutput: String? = null,
+    val durationMs: Long
+)
+
 // ide_find_symbol output
 @Serializable
 data class FindSymbolResult(

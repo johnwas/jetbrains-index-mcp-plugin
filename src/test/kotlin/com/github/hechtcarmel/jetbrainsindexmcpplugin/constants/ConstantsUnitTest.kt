@@ -22,6 +22,7 @@ class ConstantsUnitTest : TestCase() {
 
     fun testToolNamesProjectTools() {
         assertEquals("ide_index_status", ToolNames.INDEX_STATUS)
+        assertEquals("ide_build_project", ToolNames.BUILD_PROJECT)
     }
 
     fun testToolNamesRefactoringTools() {
@@ -58,6 +59,7 @@ class ConstantsUnitTest : TestCase() {
             ToolNames.DIAGNOSTICS,
             ToolNames.INDEX_STATUS,
             ToolNames.SYNC_FILES,
+            ToolNames.BUILD_PROJECT,
             ToolNames.REFACTOR_RENAME,
             ToolNames.REFACTOR_SAFE_DELETE,
             ToolNames.REFORMAT_CODE,
@@ -119,6 +121,12 @@ class ConstantsUnitTest : TestCase() {
         assertEquals("query", ParamNames.QUERY)
         assertEquals("includeLibraries", ParamNames.INCLUDE_LIBRARIES)
         assertEquals("limit", ParamNames.LIMIT)
+    }
+
+    fun testParamNamesBuild() {
+        assertEquals("rebuild", ParamNames.REBUILD)
+        assertEquals("includeRawOutput", ParamNames.INCLUDE_RAW_OUTPUT)
+        assertEquals("timeoutSeconds", ParamNames.TIMEOUT_SECONDS)
     }
 
     // UsageTypes tests

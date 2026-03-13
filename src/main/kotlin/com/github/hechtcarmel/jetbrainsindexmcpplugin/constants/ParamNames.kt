@@ -53,4 +53,9 @@ object ParamNames {
     // Filter parameters
     const val LANGUAGE = "language"
     const val MATCH_MODE = "matchMode"
+
+    // Build parameters
+    const val REBUILD = "rebuild"
+    const val INCLUDE_RAW_OUTPUT = "includeRawOutput"
+    const val TIMEOUT_SECONDS = "timeoutSeconds"
 }
