@@ -366,9 +366,14 @@ Tools are organized by IDE availability.
 **Universal Tools (All JetBrains IDEs):**
 - `ide_find_references` - Find all usages of a symbol
 - `ide_find_definition` - Find symbol definition location
+- `ide_find_class` - Search for classes/interfaces by name with camelCase/substring/wildcard matching
+- `ide_find_file` - Search for files by name using IDE's file index
+- `ide_search_text` - Text search using IDE's pre-built word index with context filtering
+- `ide_read_file` - Read file content by path or qualified name, including library/jar sources (disabled by default)
 - `ide_diagnostics` - Analyze file for problems and available intentions
 - `ide_index_status` - Check indexing status (dumb/smart mode)
 - `ide_sync_files` - Force sync IDE's virtual file system and PSI cache with external file changes
+- `ide_build_project` - Build project using IDE's build system (JPS, Gradle, Maven). Returns structured errors/warnings with file locations when available (null counts = no messages captured, not 0). Uses CompilationStatusListener for JPS builds and BuildProgressListener for Gradle/Maven builds. Supports workspace sub-project targeting via `project_path`. (disabled by default)
 - `ide_refactor_rename` - Rename a symbol across the project with automatic related element renaming (getters/setters, overriding methods). Fully headless, works for ALL languages.
 - `ide_reformat_code` - Reformat code using project code style (.editorconfig, IDE settings). Supports optional import optimization and code rearrangement. (disabled by default)
 - `ide_get_active_file` - Get the currently active file(s) in the editor (disabled by default)
@@ -377,11 +382,12 @@ Tools are organized by IDE availability.
 **Extended Navigation Tools (Language-Aware):**
 
 These activate based on available language plugins (Java, Python, JavaScript/TypeScript, Go, PHP, Rust):
-- `ide_type_hierarchy` - Get type hierarchy for a class
-- `ide_call_hierarchy` - Get call hierarchy for a method
-- `ide_find_implementations` - Find implementations of interface/method
-- `ide_find_symbol` - Search for symbols (classes, methods, fields) by name with fuzzy/camelCase matching
-- `ide_find_super_methods` - Find methods that a given method overrides/implements (full hierarchy chain)
+- `ide_type_hierarchy` - Get type hierarchy for a class (Java, Kotlin, Python, JS/TS, Go, PHP, Rust)
+- `ide_call_hierarchy` - Get call hierarchy for a method (Java, Kotlin, Python, JS/TS, Go, PHP, Rust)
+- `ide_find_implementations` - Find implementations of interface/method (Java, Kotlin, Python, JS/TS, PHP, Rust — not Go)
+- `ide_find_symbol` - Search for symbols (classes, methods, fields) by name with fuzzy/camelCase matching (disabled by default)
+- `ide_find_super_methods` - Find methods that a given method overrides/implements (Java, Kotlin, Python, JS/TS, PHP — not Go, Rust)
+- `ide_file_structure` - Get hierarchical file structure similar to IDE's Structure view (Java, Kotlin, Python, JS/TS) (disabled by default)
 
 **Java/Kotlin-Only Refactoring Tools:**
 - `ide_refactor_safe_delete` - Safely delete element (requires Java plugin)

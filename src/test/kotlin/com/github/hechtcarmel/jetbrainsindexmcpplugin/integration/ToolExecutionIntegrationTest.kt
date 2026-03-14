@@ -306,6 +306,7 @@ class ToolExecutionIntegrationTest : BasePlatformTestCase() {
             // Intelligence tools
             ToolNames.DIAGNOSTICS,
             // Project tools
+            ToolNames.BUILD_PROJECT,
             ToolNames.INDEX_STATUS,
             ToolNames.SYNC_FILES,
             // Refactoring tools
