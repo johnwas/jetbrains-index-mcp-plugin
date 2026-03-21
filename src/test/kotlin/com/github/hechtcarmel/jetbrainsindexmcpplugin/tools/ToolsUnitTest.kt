@@ -326,6 +326,13 @@ class ToolsUnitTest : TestCase() {
         assertNotNull("Should have line property", properties?.get(ParamNames.LINE))
         assertNotNull("Should have column property", properties?.get(ParamNames.COLUMN))
         assertNotNull("Should have newName property", properties?.get(ParamNames.NEW_NAME))
+        assertNotNull("Should have relatedRenamingStrategy property", properties?.get("relatedRenamingStrategy"))
+
+        // Verify relatedRenamingStrategy has enum values
+        val relatedStrategyProp = properties?.get("relatedRenamingStrategy")?.jsonObject
+        assertNotNull("relatedRenamingStrategy should have enum", relatedStrategyProp?.get("enum"))
+        val enumValues = relatedStrategyProp?.get("enum")?.jsonArray?.map { it.jsonPrimitive.content }
+        assertEquals(listOf("all", "none", "accessors_and_tests", "ask"), enumValues)
     }
 
     fun testSafeDeleteToolSchema() {

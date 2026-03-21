@@ -784,6 +784,7 @@ Renames a symbol and updates all references across the project. This tool uses I
 | `column` | integer | Yes | 1-based column number |
 | `newName` | string | Yes | The new name for the symbol |
 | `overrideStrategy` | string | No | How to handle overriding methods: `"rename_base"` (default), `"rename_only_current"`, or `"ask"` |
+| `relatedRenamingStrategy` | string | No | How to handle automatic renaming of related symbols: `"all"` (default), `"none"`, `"accessors_and_tests"`, or `"ask"` |
 
 **Example Request (Java):**
 
