@@ -5,6 +5,8 @@ import com.github.hechtcarmel.jetbrainsindexmcpplugin.handlers.createNameFilter
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.handlers.createFilteredScope
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.constants.ParamNames
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.constants.ToolNames
+import com.github.hechtcarmel.jetbrainsindexmcpplugin.server.PaginationService
+import com.github.hechtcarmel.jetbrainsindexmcpplugin.server.ProjectResolver
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.server.models.ToolCallResult
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.AbstractMcpTool
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.models.FindClassResult
@@ -13,6 +15,7 @@ import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.schema.SchemaBuilder
 import com.intellij.navigation.ChooseByNameContributor
 import com.intellij.navigation.ChooseByNameContributorEx
 import com.intellij.navigation.NavigationItem
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.project.Project
 import com.intellij.psi.PsiDocumentManager
@@ -21,9 +24,11 @@ import com.intellij.psi.PsiNamedElement
 import com.intellij.psi.codeStyle.MinusculeMatcher
 import com.intellij.psi.codeStyle.NameUtil
 import com.intellij.psi.search.GlobalSearchScope
+import com.intellij.psi.util.PsiModificationTracker
 import com.intellij.util.indexing.FindSymbolParameters
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonPrimitive
 
@@ -39,8 +44,8 @@ class FindClassTool : AbstractMcpTool() {
 
     companion object {
         private val LOG = logger<FindClassTool>()
-        private const val DEFAULT_LIMIT = 25
-        private const val MAX_LIMIT = 100
+        private const val DEFAULT_PAGE_SIZE = 25
+        private const val MAX_PAGE_SIZE = PaginationService.MAX_PAGE_SIZE
         // processNames may emit names from broader scope (including libraries/JDK) even when
         // we search in project scope. Short/common patterns like "Tool" would fill a small buffer
         // with library class names (e.g., "Toolkit", "ToolProvider") before reaching project classes.
@@ -57,28 +62,49 @@ class FindClassTool : AbstractMcpTool() {
 
         Returns: matching classes with qualified names, file paths, line numbers, and kind (class/interface/enum).
 
-        Parameters: query (required), includeLibraries (optional, default: false), limit (optional, default: 25, max: 100).
+        Supports pagination: first call returns results + nextCursor. Pass cursor to get the next page.
+        Parameters: query (required for fresh search), includeLibraries (optional, default: false), pageSize (optional, default: 25, max: 500), cursor (for pagination, replaces search params; project_path may still be required).
 
         Example: {"query": "UserService"} or {"query": "U*Impl"} or {"query": "USvc", "includeLibraries": true}
     """.trimIndent()
 
     override val inputSchema: JsonObject = SchemaBuilder.tool()
         .projectPath()
-        .stringProperty(ParamNames.QUERY, "Search pattern. Supports substring and camelCase matching.", required = true)
+        .stringProperty(ParamNames.QUERY, "Search pattern. Supports substring and camelCase matching. Required for fresh search, ignored when cursor is provided.")
         .booleanProperty(ParamNames.INCLUDE_LIBRARIES, "Include classes from library dependencies. Default: false.")
         .stringProperty(ParamNames.LANGUAGE, "Filter results by language (e.g., \"Kotlin\", \"Java\", \"Python\"). Case-insensitive. Optional.")
         .enumProperty(ParamNames.MATCH_MODE, "How to match the query. Default: \"substring\".", listOf("substring", "prefix", "exact"))
-        .intProperty(ParamNames.LIMIT, "Maximum results to return. Default: 25, Max: 100.")
+        .intProperty(ParamNames.LIMIT, "Maximum results per page (deprecated, use pageSize). Default: $DEFAULT_PAGE_SIZE, max: $MAX_PAGE_SIZE.")
+        .stringProperty("cursor", "Pagination cursor from a previous response. When provided, returns the next page of results. Search parameters are ignored; project_path and pageSize may still be provided.")
+        .intProperty("pageSize", "Results per page. Default: $DEFAULT_PAGE_SIZE, max: $MAX_PAGE_SIZE.")
         .build()
 
     override suspend fun doExecute(project: Project, arguments: JsonObject): ToolCallResult {
+        val cursor = arguments["cursor"]?.jsonPrimitive?.content
+        if (cursor != null) {
+            val pageSize = resolveExplicitPageSize(arguments, aliases = arrayOf("limit"))
+            return buildPaginatedResult<SymbolMatch, FindClassResult>(getPageFromCache(cursor, pageSize, project)) { items, page ->
+                FindClassResult(
+                    classes = items,
+                    totalCount = page.totalCollected,
+                    query = page.metadata["query"] ?: "",
+                    nextCursor = page.nextCursor,
+                    hasMore = page.hasMore,
+                    totalCollected = page.totalCollected,
+                    offset = page.offset,
+                    pageSize = page.pageSize,
+                    stale = page.stale
+                )
+            }
+        }
+
         val query = arguments[ParamNames.QUERY]?.jsonPrimitive?.content
             ?: return createErrorResult("Missing required parameter: ${ParamNames.QUERY}")
         val includeLibraries = arguments[ParamNames.INCLUDE_LIBRARIES]?.jsonPrimitive?.boolean ?: false
         val languageFilter = arguments[ParamNames.LANGUAGE]?.jsonPrimitive?.content
         val matchMode = arguments[ParamNames.MATCH_MODE]?.jsonPrimitive?.content ?: "substring"
-        val limit = (arguments[ParamNames.LIMIT]?.jsonPrimitive?.int ?: DEFAULT_LIMIT)
-            .coerceIn(1, MAX_LIMIT)
+        val pageSize = resolvePageSize(arguments, DEFAULT_PAGE_SIZE, aliases = arrayOf("limit"))
+        val collectLimit = maxOf(PaginationService.DEFAULT_OVERCOLLECT, pageSize)
 
         if (query.isBlank()) {
             return createErrorResult("Query cannot be empty")
@@ -86,26 +112,88 @@ class FindClassTool : AbstractMcpTool() {
 
         requireSmartMode(project)
 
-        return suspendingReadAction {
-            // Scope-based exclusion: venv, node_modules, and worktree files are filtered out
-            // at the IntelliJ search-infrastructure level, so they never consume buffer slots.
+        val cursorToken = suspendingReadAction {
             val scope = createFilteredScope(project, includeLibraries)
 
             val matcher = createMatcher(query, matchMode)
             val nameFilter = createNameFilter(query, matchMode, matcher)
-            val classes = searchClasses(project, query, scope, limit, nameFilter, matcher, languageFilter)
+            val classes = searchClasses(project, query, scope, collectLimit, nameFilter, matcher, languageFilter)
 
             val sortedClasses = classes
                 .distinctBy { "${it.file}:${it.line}:${it.column}:${it.name}" }
                 .sortedByDescending { matcher.matchingDegree(it.name) }
-                .take(limit)
 
-            createJsonResult(FindClassResult(
-                classes = sortedClasses,
-                totalCount = sortedClasses.size,
-                query = query
-            ))
+            val searchExtender: suspend (Set<String>, Int) -> List<PaginationService.SerializedResult> = { seenKeys, limit ->
+                suspendingReadAction {
+                    extendSearchClasses(project, query, includeLibraries, matchMode, languageFilter, seenKeys, limit)
+                }
+            }
+
+            val serializedResults = sortedClasses.map { cls ->
+                PaginationService.SerializedResult(
+                    key = "${cls.file}:${cls.line}:${cls.column}:${cls.name}",
+                    data = json.encodeToJsonElement(cls)
+                )
+            }
+
+            val paginationService = ApplicationManager.getApplication().getService(PaginationService::class.java)
+            paginationService.createCursor(
+                toolName = name,
+                results = serializedResults,
+                seenKeys = serializedResults.map { it.key }.toSet(),
+                searchExtender = searchExtender,
+                psiModCount = PsiModificationTracker.getInstance(project).modificationCount,
+                projectBasePath = ProjectResolver.normalizePath(project.basePath ?: ""),
+                metadata = mapOf("query" to query)
+            )
         }
+
+        return buildPaginatedResult<SymbolMatch, FindClassResult>(getPageFromCache(cursorToken, pageSize, project)) { items, page ->
+            FindClassResult(
+                classes = items,
+                totalCount = page.totalCollected,
+                query = page.metadata["query"] ?: "",
+                nextCursor = page.nextCursor,
+                hasMore = page.hasMore,
+                totalCollected = page.totalCollected,
+                offset = page.offset,
+                pageSize = page.pageSize,
+                stale = page.stale
+            )
+        }
+    }
+
+    /**
+     * Re-executes the search to collect more results beyond the initial cache.
+     * This re-scans from the beginning, skipping already-seen keys — O(total_results) per extension.
+     * This is unavoidable: IntelliJ's search APIs (ReferencesSearch, PsiSearchHelper, etc.)
+     * don't support offset-based iteration or resumption.
+     */
+    private fun extendSearchClasses(
+        project: Project,
+        query: String,
+        includeLibraries: Boolean,
+        matchMode: String,
+        languageFilter: String?,
+        seenKeys: Set<String>,
+        limit: Int
+    ): List<PaginationService.SerializedResult> {
+        val scope = createFilteredScope(project, includeLibraries)
+        val matcher = createMatcher(query, matchMode)
+        val nameFilter = createNameFilter(query, matchMode, matcher)
+        val classes = searchClasses(project, query, scope, limit + seenKeys.size, nameFilter, matcher, languageFilter)
+
+        return classes
+            .distinctBy { "${it.file}:${it.line}:${it.column}:${it.name}" }
+            .sortedByDescending { matcher.matchingDegree(it.name) }
+            .filter { cls -> "${cls.file}:${cls.line}:${cls.column}:${cls.name}" !in seenKeys }
+            .take(limit)
+            .map { cls ->
+                PaginationService.SerializedResult(
+                    key = "${cls.file}:${cls.line}:${cls.column}:${cls.name}",
+                    data = json.encodeToJsonElement(cls)
+                )
+            }
     }
 
     /**

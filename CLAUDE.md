@@ -436,6 +436,34 @@ Symbol search across all languages uses `OptimizedSymbolSearch` (in `handlers/Op
 - Uses `MinusculeMatcher` for CamelCase, substring, and typo-tolerant matching
 - Supports language filtering (e.g., `languageFilter = setOf("Java", "Kotlin")`)
 
+### Pagination
+
+The plugin supports cursor-based pagination for search tools that return flat result lists:
+`ide_find_references`, `ide_search_text`, `ide_find_class`, `ide_find_file`, `ide_find_symbol`, `ide_find_implementations`.
+
+**Key components:**
+- `PaginationService` (`server/PaginationService.kt`): Application-level light service managing cursor cache
+- Cursor tokens are opaque, immutable, base64url-encoded strings containing `{entryId}:{offset}:{pageSize}`
+- Same cursor token always returns the same page (idempotent, safe for retries)
+- Each response includes `nextCursor` for the next page
+
+**Cache lifecycle:**
+- Over-collection: tools collect 500 results internally, serve in configurable page sizes (default varies per tool)
+- Inactivity-based TTL: 10 minutes of idle time before cursor expires
+- LRU eviction: max 20 active cursors
+- Max 5,000 cached results per cursor; beyond this, `hasMore` returns false
+- Staleness detection via `PsiModificationTracker` — `stale: true` in response if PSI changed
+
+**Tool integration pattern:**
+1. Check for `cursor` parameter → serve from cache via `getPageFromCache()`
+2. Fresh search → collect results, create cursor via `PaginationService.createCursor()`, serve first page
+3. `searchExtender` lambda enables lazy cache extension when pages are exhausted
+4. Each tool has a `buildPaginatedResult()` helper mapping `GetPageResult` to its own result model
+
+**Schema:** All parameters are optional in the schema (no `required` array) because the Anthropic API does not support `anyOf`/`oneOf` at the top level. Validation is done at runtime — if `cursor` is absent, the tool checks for its required search params and returns an error if missing.
+
+**Backward compatibility:** Old `limit`/`maxResults` parameters work as aliases for `pageSize`. Legacy cursors (without embedded pageSize) are still decodable but require an explicit `pageSize` parameter.
+
 ### Search Collection Pattern (Processor)
 
 All search operations use the `Processor` pattern for efficient streaming and early termination:

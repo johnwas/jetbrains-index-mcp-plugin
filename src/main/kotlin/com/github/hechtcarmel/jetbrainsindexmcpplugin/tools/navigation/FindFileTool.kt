@@ -3,6 +3,8 @@ package com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.navigation
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.handlers.createFilteredScope
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.constants.ParamNames
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.constants.ToolNames
+import com.github.hechtcarmel.jetbrainsindexmcpplugin.server.PaginationService
+import com.github.hechtcarmel.jetbrainsindexmcpplugin.server.ProjectResolver
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.server.models.ToolCallResult
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.AbstractMcpTool
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.models.FileMatch
@@ -11,6 +13,7 @@ import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.schema.SchemaBuilder
 import com.intellij.navigation.ChooseByNameContributor
 import com.intellij.navigation.ChooseByNameContributorEx
 import com.intellij.navigation.NavigationItem
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFile
@@ -18,9 +21,11 @@ import com.intellij.psi.PsiFile
 import com.intellij.psi.codeStyle.MinusculeMatcher
 import com.intellij.psi.codeStyle.NameUtil
 import com.intellij.psi.search.GlobalSearchScope
+import com.intellij.psi.util.PsiModificationTracker
 import com.intellij.util.indexing.FindSymbolParameters
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonPrimitive
 
@@ -36,8 +41,8 @@ class FindFileTool : AbstractMcpTool() {
 
     companion object {
         private val LOG = logger<FindFileTool>()
-        private const val DEFAULT_LIMIT = 25
-        private const val MAX_LIMIT = 100
+        private const val DEFAULT_PAGE_SIZE = 25
+        private const val MAX_PAGE_SIZE = PaginationService.MAX_PAGE_SIZE
     }
 
     override val name = ToolNames.FIND_FILE
@@ -49,24 +54,45 @@ class FindFileTool : AbstractMcpTool() {
 
         Returns: matching files with name, path, and containing directory.
 
-        Parameters: query (required), includeLibraries (optional, default: false), limit (optional, default: 25, max: 100).
+        Supports pagination: first call returns results + nextCursor. Pass cursor to get the next page.
+        Parameters: query (required for fresh search), includeLibraries (optional, default: false), pageSize (optional, default: 25, max: 500), cursor (for pagination, replaces search params; project_path may still be required).
 
         Example: {"query": "UserService.java"} or {"query": "*Test.kt"} or {"query": "BG"} (matches build.gradle)
     """.trimIndent()
 
     override val inputSchema: JsonObject = SchemaBuilder.tool()
         .projectPath()
-        .stringProperty(ParamNames.QUERY, "File name pattern. Supports substring and fuzzy matching.", required = true)
+        .stringProperty(ParamNames.QUERY, "File name pattern. Supports substring and fuzzy matching. Required for fresh search, ignored when cursor is provided.")
         .booleanProperty(ParamNames.INCLUDE_LIBRARIES, "Include files from library dependencies. Default: false.")
-        .intProperty(ParamNames.LIMIT, "Maximum results to return. Default: 25, Max: 100.")
+        .intProperty(ParamNames.LIMIT, "Maximum results per page (deprecated, use pageSize). Default: $DEFAULT_PAGE_SIZE, max: $MAX_PAGE_SIZE.")
+        .stringProperty("cursor", "Pagination cursor from a previous response. When provided, returns the next page of results. Search parameters are ignored; project_path and pageSize may still be provided.")
+        .intProperty("pageSize", "Results per page. Default: $DEFAULT_PAGE_SIZE, max: $MAX_PAGE_SIZE.")
         .build()
 
     override suspend fun doExecute(project: Project, arguments: JsonObject): ToolCallResult {
+        val cursor = arguments["cursor"]?.jsonPrimitive?.content
+        if (cursor != null) {
+            val pageSize = resolveExplicitPageSize(arguments, aliases = arrayOf("limit"))
+            return buildPaginatedResult<FileMatch, FindFileResult>(getPageFromCache(cursor, pageSize, project)) { items, page ->
+                FindFileResult(
+                    files = items,
+                    totalCount = page.totalCollected,
+                    query = page.metadata["query"] ?: "",
+                    nextCursor = page.nextCursor,
+                    hasMore = page.hasMore,
+                    totalCollected = page.totalCollected,
+                    offset = page.offset,
+                    pageSize = page.pageSize,
+                    stale = page.stale
+                )
+            }
+        }
+
         val query = arguments[ParamNames.QUERY]?.jsonPrimitive?.content
             ?: return createErrorResult("Missing required parameter: ${ParamNames.QUERY}")
         val includeLibraries = arguments[ParamNames.INCLUDE_LIBRARIES]?.jsonPrimitive?.boolean ?: false
-        val limit = (arguments[ParamNames.LIMIT]?.jsonPrimitive?.int ?: DEFAULT_LIMIT)
-            .coerceIn(1, MAX_LIMIT)
+        val pageSize = resolvePageSize(arguments, DEFAULT_PAGE_SIZE, aliases = arrayOf("limit"))
+        val collectLimit = maxOf(PaginationService.DEFAULT_OVERCOLLECT, pageSize)
 
         if (query.isBlank()) {
             return createErrorResult("Query cannot be empty")
@@ -74,22 +100,83 @@ class FindFileTool : AbstractMcpTool() {
 
         requireSmartMode(project)
 
-        return suspendingReadAction {
+        val cursorToken = suspendingReadAction {
             val scope = createFilteredScope(project, includeLibraries)
             val matcher = createMatcher(query)
-            val files = searchFiles(project, query, scope, limit, matcher)
+            val files = searchFiles(project, query, scope, collectLimit, matcher)
 
             val sortedFiles = files
                 .distinctBy { it.path }
                 .sortedByDescending { matcher.matchingDegree(it.name) }
-                .take(limit)
 
-            createJsonResult(FindFileResult(
-                files = sortedFiles,
-                totalCount = sortedFiles.size,
-                query = query
-            ))
+            val searchExtender: suspend (Set<String>, Int) -> List<PaginationService.SerializedResult> = { seenKeys, limit ->
+                suspendingReadAction {
+                    extendSearchFiles(project, query, includeLibraries, seenKeys, limit)
+                }
+            }
+
+            val serializedResults = sortedFiles.map { file ->
+                PaginationService.SerializedResult(
+                    key = file.path,
+                    data = json.encodeToJsonElement(file)
+                )
+            }
+
+            val paginationService = ApplicationManager.getApplication().getService(PaginationService::class.java)
+            paginationService.createCursor(
+                toolName = name,
+                results = serializedResults,
+                seenKeys = serializedResults.map { it.key }.toSet(),
+                searchExtender = searchExtender,
+                psiModCount = PsiModificationTracker.getInstance(project).modificationCount,
+                projectBasePath = ProjectResolver.normalizePath(project.basePath ?: ""),
+                metadata = mapOf("query" to query)
+            )
         }
+
+        return buildPaginatedResult<FileMatch, FindFileResult>(getPageFromCache(cursorToken, pageSize, project)) { items, page ->
+            FindFileResult(
+                files = items,
+                totalCount = page.totalCollected,
+                query = page.metadata["query"] ?: "",
+                nextCursor = page.nextCursor,
+                hasMore = page.hasMore,
+                totalCollected = page.totalCollected,
+                offset = page.offset,
+                pageSize = page.pageSize,
+                stale = page.stale
+            )
+        }
+    }
+
+    /**
+     * Re-executes the search to collect more results beyond the initial cache.
+     * This re-scans from the beginning, skipping already-seen keys — O(total_results) per extension.
+     * This is unavoidable: IntelliJ's search APIs (ReferencesSearch, PsiSearchHelper, etc.)
+     * don't support offset-based iteration or resumption.
+     */
+    private fun extendSearchFiles(
+        project: Project,
+        query: String,
+        includeLibraries: Boolean,
+        seenKeys: Set<String>,
+        limit: Int
+    ): List<PaginationService.SerializedResult> {
+        val scope = createFilteredScope(project, includeLibraries)
+        val matcher = createMatcher(query)
+        val files = searchFiles(project, query, scope, limit + seenKeys.size, matcher)
+
+        return files
+            .distinctBy { it.path }
+            .sortedByDescending { matcher.matchingDegree(it.name) }
+            .filter { it.path !in seenKeys }
+            .take(limit)
+            .map { file ->
+                PaginationService.SerializedResult(
+                    key = file.path,
+                    data = json.encodeToJsonElement(file)
+                )
+            }
     }
 
     /**

@@ -1,6 +1,8 @@
 package com.github.hechtcarmel.jetbrainsindexmcpplugin.tools
 
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.exceptions.IndexNotReadyException
+import com.github.hechtcarmel.jetbrainsindexmcpplugin.server.PaginationService
+import com.github.hechtcarmel.jetbrainsindexmcpplugin.server.ProjectResolver
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.server.models.ContentBlock
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.server.models.ToolCallResult
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.settings.McpSettings
@@ -26,11 +28,15 @@ import com.intellij.psi.PsiDocumentManager
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiFile
 import com.intellij.psi.PsiManager
+import com.intellij.psi.util.PsiModificationTracker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.int
+import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * Abstract base class for MCP tools providing common functionality.
@@ -437,6 +443,72 @@ abstract class AbstractMcpTool : McpTool {
      */
     protected fun findClassByName(project: Project, qualifiedName: String): PsiElement? {
         return ClassResolver.findClassByName(project, qualifiedName)
+    }
+
+    /**
+     * Gets a page from the pagination cache.
+     * Extracts project basePath and PSI mod count, delegates to PaginationService.
+     * Returns GetPageResult — caller maps Success/Error into tool-specific ToolCallResult.
+     *
+     * @param pageSize Explicit pageSize from request, or null to use the cursor-embedded value.
+     */
+    protected suspend fun getPageFromCache(cursorToken: String, pageSize: Int?, project: Project): PaginationService.GetPageResult {
+        val service = ApplicationManager.getApplication().getService(PaginationService::class.java)
+        val basePath = ProjectResolver.normalizePath(project.basePath ?: "")
+        val modCount = PsiModificationTracker.getInstance(project).modificationCount
+        return service.getPage(cursorToken, pageSize, basePath, modCount)
+    }
+
+    /**
+     * Builds a paginated tool result from a GetPageResult.
+     * Handles error mapping and JSON deserialization of page items.
+     * @param T The item type to deserialize from JSON
+     * @param R The result model type to serialize (must be @Serializable)
+     * @param result The pagination result from getPageFromCache
+     * @param builder Constructs the tool-specific result model from deserialized items and page metadata
+     */
+    protected inline fun <reified T, reified R> buildPaginatedResult(
+        result: PaginationService.GetPageResult,
+        builder: (items: List<T>, page: PaginationService.PaginationPage) -> R
+    ): ToolCallResult {
+        return when (result) {
+            is PaginationService.GetPageResult.Error -> createErrorResult(result.message)
+            is PaginationService.GetPageResult.Success -> {
+                val items = result.page.items.map { json.decodeFromJsonElement<T>(it) }
+                createJsonResult(builder(items, result.page))
+            }
+        }
+    }
+
+    /**
+     * Resolves pageSize from arguments, checking pageSize first, then legacy aliases.
+     * Result is clamped to [1, maxPageSize].
+     */
+    protected fun resolvePageSize(
+        arguments: JsonObject,
+        defaultPageSize: Int,
+        maxPageSize: Int = PaginationService.MAX_PAGE_SIZE,
+        vararg aliases: String
+    ): Int {
+        val raw = arguments["pageSize"]?.jsonPrimitive?.int
+            ?: aliases.firstNotNullOfOrNull { arguments[it]?.jsonPrimitive?.int }
+            ?: defaultPageSize
+        return raw.coerceIn(1, maxPageSize)
+    }
+
+    /**
+     * Returns the explicitly provided pageSize from arguments, or null if not specified.
+     * Used in cursor paths so the cursor-embedded pageSize is used as fallback.
+     */
+    protected fun resolveExplicitPageSize(
+        arguments: JsonObject,
+        maxPageSize: Int = PaginationService.MAX_PAGE_SIZE,
+        vararg aliases: String
+    ): Int? {
+        val raw = arguments["pageSize"]?.jsonPrimitive?.int
+            ?: aliases.firstNotNullOfOrNull { arguments[it]?.jsonPrimitive?.int }
+            ?: return null
+        return raw.coerceIn(1, maxPageSize)
     }
 
     /**

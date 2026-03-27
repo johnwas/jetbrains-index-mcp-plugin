@@ -4,6 +4,13 @@
 
 ## [Unreleased]
 
+## [4.7.0] - 2026-03-26
+### Added
+- Cursor-based pagination for `ide_find_references`, `ide_search_text`, `ide_find_class`, `ide_find_file`, `ide_find_symbol`, and `ide_find_implementations`
+
+### Fixed
+- `ide_search_text` context filter (`context: "comments"`, `"code"`, `"strings"`) returned false positives from non-matching contexts
+
 ## [4.6.0] - 2026-03-21
 ### Added
 - **`ide_refactor_rename`: `relatedRenamingStrategy` parameter** — Controls automatic renaming of related symbols (same-named properties on unrelated classes, getters/setters, test classes, variables). Options: `"all"` (default, current behavior), `"none"` (rename only the targeted symbol), `"accessors_and_tests"` (only rename getters/setters and test classes/methods), `"ask"` (show IDE dialog for interactive choice). Fixes [#101](https://github.com/hechtcarmel/jetbrains-index-mcp-plugin/issues/101).

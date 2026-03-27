@@ -26,6 +26,7 @@ import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.refactoring.Reformat
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.refactoring.RenameSymbolTool
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.refactoring.SafeDeleteTool
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.handlers.isExcludedPath
+import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.schema.SchemaBuilder
 import junit.framework.TestCase
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -113,9 +114,11 @@ class ToolsUnitTest : TestCase() {
         assertNotNull("Should have file property", properties?.get(ParamNames.FILE))
         assertNotNull("Should have line property", properties?.get(ParamNames.LINE))
         assertNotNull("Should have column property", properties?.get(ParamNames.COLUMN))
+        assertNotNull("Should have cursor property", properties?.get("cursor"))
+        assertNotNull("Should have pageSize property", properties?.get("pageSize"))
 
-        val required = schema[SchemaConstants.REQUIRED]
-        assertNotNull("Should have required array", required)
+        assertNull("Should not have anyOf (incompatible with Anthropic API)", schema["anyOf"])
+        assertNull("Should not have required array (all params optional for pagination)", schema[SchemaConstants.REQUIRED])
     }
 
     fun testFindDefinitionToolSchema() {
@@ -185,6 +188,11 @@ class ToolsUnitTest : TestCase() {
         assertNotNull("Should have file property", properties?.get(ParamNames.FILE))
         assertNotNull("Should have line property", properties?.get(ParamNames.LINE))
         assertNotNull("Should have column property", properties?.get(ParamNames.COLUMN))
+        assertNotNull("Should have cursor property", properties?.get("cursor"))
+        assertNotNull("Should have pageSize property", properties?.get("pageSize"))
+
+        assertNull("Should not have anyOf (incompatible with Anthropic API)", schema["anyOf"])
+        assertNull("Should not have required array (all params optional for pagination)", schema[SchemaConstants.REQUIRED])
     }
 
     fun testGetDiagnosticsToolSchema() {
@@ -400,9 +408,11 @@ class ToolsUnitTest : TestCase() {
         assertNotNull("Should have query property", properties?.get(ParamNames.QUERY))
         assertNotNull("Should have includeLibraries property", properties?.get(ParamNames.INCLUDE_LIBRARIES))
         assertNotNull("Should have limit property", properties?.get(ParamNames.LIMIT))
+        assertNotNull("Should have cursor property", properties?.get("cursor"))
+        assertNotNull("Should have pageSize property", properties?.get("pageSize"))
 
-        val required = schema[SchemaConstants.REQUIRED]
-        assertNotNull("Should have required array", required)
+        assertNull("Should not have anyOf (incompatible with Anthropic API)", schema["anyOf"])
+        assertNull("Should not have required array (all params optional for pagination)", schema[SchemaConstants.REQUIRED])
     }
 
     fun testFindSuperMethodsToolSchema() {
@@ -552,9 +562,11 @@ class ToolsUnitTest : TestCase() {
         assertNotNull("Should have query property", properties?.get(ParamNames.QUERY))
         assertNotNull("Should have includeLibraries property", properties?.get(ParamNames.INCLUDE_LIBRARIES))
         assertNotNull("Should have limit property", properties?.get(ParamNames.LIMIT))
+        assertNotNull("Should have cursor property", properties?.get("cursor"))
+        assertNotNull("Should have pageSize property", properties?.get("pageSize"))
 
-        val required = schema[SchemaConstants.REQUIRED]
-        assertNotNull("Should have required array", required)
+        assertNull("Should not have anyOf (incompatible with Anthropic API)", schema["anyOf"])
+        assertNull("Should not have required array (all params optional for pagination)", schema[SchemaConstants.REQUIRED])
     }
 
     fun testFindFileToolSchema() {
@@ -573,9 +585,11 @@ class ToolsUnitTest : TestCase() {
         assertNotNull("Should have query property", properties?.get(ParamNames.QUERY))
         assertNotNull("Should have includeLibraries property", properties?.get(ParamNames.INCLUDE_LIBRARIES))
         assertNotNull("Should have limit property", properties?.get(ParamNames.LIMIT))
+        assertNotNull("Should have cursor property", properties?.get("cursor"))
+        assertNotNull("Should have pageSize property", properties?.get("pageSize"))
 
-        val required = schema[SchemaConstants.REQUIRED]
-        assertNotNull("Should have required array", required)
+        assertNull("Should not have anyOf (incompatible with Anthropic API)", schema["anyOf"])
+        assertNull("Should not have required array (all params optional for pagination)", schema[SchemaConstants.REQUIRED])
     }
 
     fun testSearchTextToolSchema() {
@@ -595,9 +609,11 @@ class ToolsUnitTest : TestCase() {
         assertNotNull("Should have context property", properties?.get(ParamNames.CONTEXT))
         assertNotNull("Should have caseSensitive property", properties?.get(ParamNames.CASE_SENSITIVE))
         assertNotNull("Should have limit property", properties?.get(ParamNames.LIMIT))
+        assertNotNull("Should have cursor property", properties?.get("cursor"))
+        assertNotNull("Should have pageSize property", properties?.get("pageSize"))
 
-        val required = schema[SchemaConstants.REQUIRED]
-        assertNotNull("Should have required array", required)
+        assertNull("Should not have anyOf (incompatible with Anthropic API)", schema["anyOf"])
+        assertNull("Should not have required array (all params optional for pagination)", schema[SchemaConstants.REQUIRED])
     }
 
     fun testGetActiveFileToolSchema() {
@@ -823,4 +839,5 @@ class ToolsUnitTest : TestCase() {
         assertFalse("nested build path should not match", isExcludedPath("src/build/notes.md"))
         assertFalse("root file should not be excluded",   isExcludedPath("README.md"))
     }
+
 }

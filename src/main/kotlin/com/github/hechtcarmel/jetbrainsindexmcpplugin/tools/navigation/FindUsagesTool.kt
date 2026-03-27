@@ -4,22 +4,28 @@ import com.github.hechtcarmel.jetbrainsindexmcpplugin.constants.ErrorMessages
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.constants.ParamNames
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.constants.ToolNames
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.constants.UsageTypes
+import com.github.hechtcarmel.jetbrainsindexmcpplugin.server.PaginationService
+import com.github.hechtcarmel.jetbrainsindexmcpplugin.server.ProjectResolver
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.server.models.ToolCallResult
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.AbstractMcpTool
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.models.FindUsagesResult
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.models.UsageLocation
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.schema.SchemaBuilder
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.util.PsiUtils
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.TextRange
 import com.intellij.psi.PsiDocumentManager
 import com.intellij.psi.PsiElement
+import com.intellij.psi.SmartPointerManager
 import com.intellij.psi.search.searches.ReferencesSearch
+import com.intellij.psi.util.PsiModificationTracker
 import com.intellij.util.Processor
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonPrimitive
 
@@ -27,7 +33,7 @@ class FindUsagesTool : AbstractMcpTool() {
 
     companion object {
         private const val DEFAULT_MAX_RESULTS = 100
-        private const val MAX_ALLOWED_RESULTS = 500
+        private const val MAX_PAGE_SIZE = PaginationService.MAX_PAGE_SIZE
     }
 
     override val name = ToolNames.FIND_REFERENCES
@@ -37,56 +43,72 @@ class FindUsagesTool : AbstractMcpTool() {
 
         Returns: file paths, line numbers, context snippets, and reference types (method_call, field_access, import, etc.).
 
-        Parameters: file + line + column (required), maxResults (optional, default: 100, max: 500).
+        Supports pagination: first call returns results + nextCursor. Pass cursor to get the next page.
+        Parameters: file + line + column (required for fresh search), pageSize (optional, default: 100, max: 500), cursor (for pagination, replaces search params; project_path may still be required).
 
         Example: {"file": "src/UserService.java", "line": 25, "column": 18}
     """.trimIndent()
 
     override val inputSchema: JsonObject = SchemaBuilder.tool()
         .projectPath()
-        .file(description = "Path to file relative to project root (e.g., 'src/main/java/com/example/MyClass.java'). REQUIRED.")
-        .lineAndColumn()
-        .intProperty("maxResults", "Maximum number of references to return. Default: $DEFAULT_MAX_RESULTS, max: $MAX_ALLOWED_RESULTS.")
+        .file(required = false, description = "Path to file relative to project root. Required for fresh search, ignored when cursor is provided.")
+        .intProperty("line", "1-based line number. Required for fresh search, ignored when cursor is provided.")
+        .intProperty("column", "1-based column number. Required for fresh search, ignored when cursor is provided.")
+        .intProperty("maxResults", "Maximum results per page (deprecated, use pageSize). Default: $DEFAULT_MAX_RESULTS, max: $MAX_PAGE_SIZE.")
+        .stringProperty("cursor", "Pagination cursor from a previous response. When provided, returns the next page of results. Search parameters are ignored; project_path and pageSize may still be provided.")
+        .intProperty("pageSize", "Results per page. Default: $DEFAULT_MAX_RESULTS, max: $MAX_PAGE_SIZE.")
         .build()
 
     override suspend fun doExecute(project: Project, arguments: JsonObject): ToolCallResult {
+        val cursor = arguments["cursor"]?.jsonPrimitive?.content
+        if (cursor != null) {
+            val pageSize = resolveExplicitPageSize(arguments, aliases = arrayOf("maxResults"))
+            return buildPaginatedResult<UsageLocation, FindUsagesResult>(getPageFromCache(cursor, pageSize, project)) { items, page ->
+                FindUsagesResult(
+                    usages = items,
+                    totalCount = page.totalCollected,
+                    truncated = page.hasMore,
+                    nextCursor = page.nextCursor,
+                    hasMore = page.hasMore,
+                    totalCollected = page.totalCollected,
+                    offset = page.offset,
+                    pageSize = page.pageSize,
+                    stale = page.stale
+                )
+            }
+        }
+
         val file = arguments[ParamNames.FILE]?.jsonPrimitive?.content
             ?: return createErrorResult(ErrorMessages.missingRequiredParam(ParamNames.FILE))
         val line = arguments[ParamNames.LINE]?.jsonPrimitive?.int
             ?: return createErrorResult(ErrorMessages.missingRequiredParam(ParamNames.LINE))
         val column = arguments[ParamNames.COLUMN]?.jsonPrimitive?.int
             ?: return createErrorResult(ErrorMessages.missingRequiredParam(ParamNames.COLUMN))
-        val maxResults = (arguments["maxResults"]?.jsonPrimitive?.int ?: DEFAULT_MAX_RESULTS)
-            .coerceIn(1, MAX_ALLOWED_RESULTS)
+        val pageSize = resolvePageSize(arguments, DEFAULT_MAX_RESULTS, aliases = arrayOf("maxResults"))
+        val collectLimit = maxOf(PaginationService.DEFAULT_OVERCOLLECT, pageSize)
 
         requireSmartMode(project)
 
-        return suspendingReadAction {
+        val cursorToken = suspendingReadAction {
             val element = findPsiElement(project, file, line, column)
-                ?: return@suspendingReadAction createErrorResult(ErrorMessages.noElementAtPosition(file, line, column))
+                ?: return@suspendingReadAction null to createErrorResult(ErrorMessages.noElementAtPosition(file, line, column))
 
-            // Resolve the target element using semantic reference resolution.
-            // This correctly handles method calls (resolves to the called method)
-            // vs declarations (returns the declaration itself).
             val targetElement = PsiUtils.resolveTargetElement(element)
-                ?: return@suspendingReadAction createErrorResult(ErrorMessages.NO_NAMED_ELEMENT)
+                ?: return@suspendingReadAction null to createErrorResult(ErrorMessages.NO_NAMED_ELEMENT)
 
-            // Lock-free concurrent collection - ReferencesSearch may invoke processor from multiple threads
             val usages = ConcurrentLinkedQueue<UsageLocation>()
             val totalFound = AtomicInteger(0)
-            // Cap total counting to avoid scanning unbounded references
-            val totalCountLimit = maxResults * 10
+            val totalCountLimit = collectLimit * 10
 
-            // Process references with cancellation support and early termination
             ReferencesSearch.search(targetElement).forEach(Processor { reference ->
-                ProgressManager.checkCanceled() // Allow cancellation between iterations
+                ProgressManager.checkCanceled()
 
                 val refElement = reference.element
                 val refFile = refElement.containingFile?.virtualFile
                 if (refFile != null) {
                     val total = totalFound.incrementAndGet()
 
-                    if (total <= maxResults) {
+                    if (total <= collectLimit) {
                         val document = PsiDocumentManager.getInstance(project)
                             .getDocument(refElement.containingFile)
                         if (document != null) {
@@ -111,7 +133,6 @@ class FindUsagesTool : AbstractMcpTool() {
                         }
                     }
 
-                    // Stop iteration once we've counted enough to know there are more
                     total < totalCountLimit
                 } else {
                     true
@@ -120,13 +141,105 @@ class FindUsagesTool : AbstractMcpTool() {
 
             val usagesList = usages.toList()
                 .distinctBy { "${it.file}:${it.line}:${it.column}" }
-            val total = totalFound.get()
-            createJsonResult(FindUsagesResult(
-                usages = usagesList,
-                totalCount = total,
-                truncated = total > maxResults
-            ))
+
+            val smartPointer = SmartPointerManager.getInstance(project).createSmartPsiElementPointer(targetElement)
+
+            val searchExtender: suspend (Set<String>, Int) -> List<PaginationService.SerializedResult> = { seenKeys, limit ->
+                suspendingReadAction {
+                    val el = smartPointer.element
+                        ?: throw IllegalStateException("Target element no longer valid")
+                    extendFindUsages(project, el, seenKeys, limit)
+                }
+            }
+
+            val serializedResults = usagesList.map { usage ->
+                PaginationService.SerializedResult(
+                    key = "${usage.file}:${usage.line}:${usage.column}",
+                    data = json.encodeToJsonElement(usage)
+                )
+            }
+
+            val paginationService = ApplicationManager.getApplication().getService(PaginationService::class.java)
+            val token = paginationService.createCursor(
+                toolName = name,
+                results = serializedResults,
+                seenKeys = serializedResults.map { it.key }.toSet(),
+                searchExtender = searchExtender,
+                psiModCount = PsiModificationTracker.getInstance(project).modificationCount,
+                projectBasePath = ProjectResolver.normalizePath(project.basePath ?: "")
+            )
+
+            token to null
         }
+
+        val (token, errorResult) = cursorToken
+        if (errorResult != null) return errorResult
+
+        return buildPaginatedResult<UsageLocation, FindUsagesResult>(getPageFromCache(token!!, pageSize, project)) { items, page ->
+            FindUsagesResult(
+                usages = items,
+                totalCount = page.totalCollected,
+                truncated = page.hasMore,
+                nextCursor = page.nextCursor,
+                hasMore = page.hasMore,
+                totalCollected = page.totalCollected,
+                offset = page.offset,
+                pageSize = page.pageSize,
+                stale = page.stale
+            )
+        }
+    }
+
+    /**
+     * Re-executes the search to collect more results beyond the initial cache.
+     * This re-scans from the beginning, skipping already-seen keys — O(total_results) per extension.
+     * This is unavoidable: IntelliJ's search APIs (ReferencesSearch, PsiSearchHelper, etc.)
+     * don't support offset-based iteration or resumption.
+     */
+    private fun extendFindUsages(
+        project: Project,
+        targetElement: PsiElement,
+        seenKeys: Set<String>,
+        limit: Int
+    ): List<PaginationService.SerializedResult> {
+        val newResults = ConcurrentLinkedQueue<PaginationService.SerializedResult>()
+        val count = AtomicInteger(0)
+
+        ReferencesSearch.search(targetElement).forEach(Processor { reference ->
+            ProgressManager.checkCanceled()
+            val refElement = reference.element
+            val refFile = refElement.containingFile?.virtualFile
+            if (refFile != null) {
+                val document = PsiDocumentManager.getInstance(project).getDocument(refElement.containingFile)
+                if (document != null) {
+                    val lineNumber = document.getLineNumber(refElement.textOffset) + 1
+                    val columnNumber = refElement.textOffset - document.getLineStartOffset(lineNumber - 1) + 1
+                    val key = "${getRelativePath(project, refFile)}:$lineNumber:$columnNumber"
+
+                    if (key !in seenKeys) {
+                        val slot = count.incrementAndGet()
+                        if (slot <= limit) {
+                            val lineText = document.getText(
+                                TextRange(document.getLineStartOffset(lineNumber - 1), document.getLineEndOffset(lineNumber - 1))
+                            ).trim()
+                            val usage = UsageLocation(
+                                file = getRelativePath(project, refFile),
+                                line = lineNumber,
+                                column = columnNumber,
+                                context = lineText,
+                                type = classifyUsage(refElement)
+                            )
+                            newResults.add(PaginationService.SerializedResult(key, json.encodeToJsonElement(usage)))
+                        }
+                        slot < limit
+                    } else {
+                        true
+                    }
+                } else true
+            } else true
+        })
+
+        return newResults.toList()
     }
 
     private fun classifyUsage(element: PsiElement): String {
