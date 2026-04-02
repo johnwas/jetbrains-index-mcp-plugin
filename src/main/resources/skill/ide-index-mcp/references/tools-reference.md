@@ -32,8 +32,8 @@ Find all usages of a symbol (semantic, not text search).
 | `maxResults` | integer | no | Default 100, max 500 |
 | `project_path` | string | no | Project root path |
 
-**Returns**: `{ usages: [{file, line, column, context, usageType}], totalCount, truncated }`
-**usageType values**: `method_call`, `field_access`, `import`, `parameter`, `variable`, `reference`
+**Returns**: `{ usages: [{ file, line, column, context, type, astPath }], totalCount, truncated }`
+**type values**: `METHOD_CALL`, `FIELD_ACCESS`, `IMPORT`, `PARAMETER`, `VARIABLE`, `REFERENCE`
 
 ### ide_find_definition
 Go to where a symbol is defined.
@@ -47,7 +47,7 @@ Go to where a symbol is defined.
 | `maxPreviewLines` | integer | no | Max lines for full preview (default 50, max 500) |
 | `project_path` | string | no | Project root path |
 
-**Returns**: `{ file, line, column, preview, symbolName }`
+**Returns**: `{ file, line, column, preview, symbolName, astPath }`
 Handles: packages, compiled classes, library sources (jar: URLs).
 
 ### ide_find_class

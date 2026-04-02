@@ -128,7 +128,8 @@ class FindUsagesTool : AbstractMcpTool() {
                                 line = lineNumber,
                                 column = columnNumber,
                                 context = lineText,
-                                type = classifyUsage(refElement)
+                                type = classifyUsage(refElement),
+                                astPath = PsiUtils.getAstPath(refElement)
                             ))
                         }
                     }
@@ -227,7 +228,8 @@ class FindUsagesTool : AbstractMcpTool() {
                                 line = lineNumber,
                                 column = columnNumber,
                                 context = lineText,
-                                type = classifyUsage(refElement)
+                                type = classifyUsage(refElement),
+                                astPath = PsiUtils.getAstPath(refElement)
                             )
                             newResults.add(PaginationService.SerializedResult(key, json.encodeToJsonElement(usage)))
                         }

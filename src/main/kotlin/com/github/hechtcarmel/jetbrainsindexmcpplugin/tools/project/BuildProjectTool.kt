@@ -8,7 +8,7 @@ import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.AbstractMcpTool
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.models.BuildMessage
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.models.BuildProjectResult
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.schema.SchemaBuilder
-import com.github.hechtcarmel.jetbrainsindexmcpplugin.util.ProjectUtils
+import com.github.hechtcarmel.jetbrainsindexmcpplugin.util.BuildListenerUtils
 import com.intellij.ide.trustedProjects.TrustedProjects
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.diagnostic.logger
@@ -111,7 +111,8 @@ class BuildProjectTool : AbstractMcpTool() {
         })
 
         subscribeToCompilerMessages(project, connection, compilerMessages, compilerRawOutput, includeRawOutput)
-        val buildEventsDisposable = subscribeToBuildEvents(project, buildEventMessages, buildEventRawOutput, includeRawOutput)
+        val parentDisposable = Disposer.newDisposable("BuildProjectTool-parent")
+        val buildEventsDisposable = subscribeToBuildEvents(project, parentDisposable, buildEventMessages, buildEventRawOutput, includeRawOutput)
 
         try {
             val promise = taskManager.run(context, task)
@@ -165,7 +166,10 @@ class BuildProjectTool : AbstractMcpTool() {
             return createErrorResult("Build failed: ${e.message}")
         } finally {
             connection.disconnect()
-            buildEventsDisposable?.let { Disposer.dispose(it) }
+            if (buildEventsDisposable != null) {
+                Disposer.dispose(buildEventsDisposable)
+            }
+            Disposer.dispose(parentDisposable)
         }
     }
 
@@ -194,108 +198,28 @@ class BuildProjectTool : AbstractMcpTool() {
         return null
     }
 
-    @Suppress("UNCHECKED_CAST")
     private fun subscribeToBuildEvents(
         project: Project,
+        parentDisposable: Disposable,
         messages: MutableList<BuildMessage>,
         rawOutput: StringBuffer,
         includeRawOutput: Boolean
     ): Disposable? {
-        try {
-            val buildViewManagerClass = Class.forName("com.intellij.build.BuildViewManager")
-            val listenerClass = Class.forName("com.intellij.build.BuildProgressListener")
-            val messageEventClass = Class.forName("com.intellij.build.events.MessageEvent")
-            val fileMessageEventClass = Class.forName("com.intellij.build.events.FileMessageEvent")
-            val outputEventClass = try {
-                Class.forName("com.intellij.build.events.OutputBuildEvent")
-            } catch (_: ClassNotFoundException) { null }
+        return BuildListenerUtils.subscribeToBuildProgressListener(project, parentDisposable) { _, event ->
+            val buildMessage = BuildListenerUtils.extractBuildMessage(event, project)
+            if (buildMessage != null) {
+                messages.add(buildMessage)
+            }
 
-            val buildViewManager = project.getService(buildViewManagerClass) ?: return null
-            val disposable = Disposer.newDisposable("BuildProjectTool-buildEvents")
-
-            val proxy = java.lang.reflect.Proxy.newProxyInstance(
-                listenerClass.classLoader,
-                arrayOf(listenerClass)
-            ) { _, method, args ->
-                if (method.name == "onEvent" && args != null && args.size >= 2) {
-                    val event = args[1] ?: return@newProxyInstance null
-                    try {
-                        processBuildEvent(event, messageEventClass, fileMessageEventClass,
-                            outputEventClass, project, messages, rawOutput, includeRawOutput)
-                    } catch (_: Exception) {}
+            if (includeRawOutput) {
+                val text = BuildListenerUtils.extractRawOutput(event)
+                if (text != null && rawOutput.length < MAX_RAW_OUTPUT_CHARS) {
+                    rawOutput.append(text)
                 }
-                null
-            }
-
-            val addListenerMethod = buildViewManagerClass.methods.find {
-                it.name == "addListener" && it.parameterCount == 2
-            }
-            addListenerMethod?.invoke(buildViewManager, proxy, disposable)
-
-            LOG.debug("Subscribed to BuildProgressListener for build events")
-            return disposable
-        } catch (e: ClassNotFoundException) {
-            LOG.debug("BuildViewManager not available, build events will not be captured")
-            return null
-        } catch (e: Exception) {
-            LOG.warn("Failed to subscribe to BuildProgressListener", e)
-            return null
-        }
-    }
-
-    private fun processBuildEvent(
-        event: Any,
-        messageEventClass: Class<*>,
-        fileMessageEventClass: Class<*>,
-        outputEventClass: Class<*>?,
-        project: Project,
-        messages: MutableList<BuildMessage>,
-        rawOutput: StringBuffer,
-        includeRawOutput: Boolean
-    ) {
-        if (messageEventClass.isInstance(event)) {
-            val kindEnum = event.javaClass.getMethod("getKind").invoke(event)
-            val kindName = kindEnum.toString()
-
-            if (kindName == "ERROR" || kindName == "WARNING") {
-                val message = event.javaClass.getMethod("getMessage").invoke(event) as? String ?: return
-                var file: String? = null
-                var line: Int? = null
-                var column: Int? = null
-
-                if (fileMessageEventClass.isInstance(event)) {
-                    try {
-                        val filePosition = event.javaClass.getMethod("getFilePosition").invoke(event)
-                        if (filePosition != null) {
-                            val posFile = filePosition.javaClass.getMethod("getFile").invoke(filePosition) as? java.io.File
-                            file = posFile?.absolutePath?.let { ProjectUtils.getRelativePath(project, it) }
-                            line = (filePosition.javaClass.getMethod("getStartLine").invoke(filePosition) as? Int)?.plus(1)
-                            column = (filePosition.javaClass.getMethod("getStartColumn").invoke(filePosition) as? Int)?.plus(1)
-                        }
-                    } catch (_: Exception) {}
-                }
-
-                messages.add(BuildMessage(
-                    category = kindName,
-                    message = message,
-                    file = file,
-                    line = line,
-                    column = column
-                ))
-            }
-        }
-
-        if (includeRawOutput && outputEventClass != null && outputEventClass.isInstance(event)) {
-            val text = try {
-                event.javaClass.getMethod("getMessage").invoke(event) as? String
-            } catch (_: Exception) { null }
-            if (!text.isNullOrBlank() && rawOutput.length < MAX_RAW_OUTPUT_CHARS) {
-                rawOutput.append(text)
             }
         }
     }
 
-    @Suppress("UNCHECKED_CAST")
     private fun subscribeToCompilerMessages(
         project: Project,
         connection: com.intellij.util.messages.MessageBusConnection,
@@ -303,104 +227,12 @@ class BuildProjectTool : AbstractMcpTool() {
         rawOutput: StringBuffer,
         includeRawOutput: Boolean
     ) {
-        try {
-            val compilerTopicsClass = Class.forName("com.intellij.openapi.compiler.CompilerTopics")
-            val compilationStatusField = compilerTopicsClass.getField("COMPILATION_STATUS")
-            val topic = compilationStatusField.get(null) as com.intellij.util.messages.Topic<Any>
-
-            val listenerClass = Class.forName("com.intellij.openapi.compiler.CompilationStatusListener")
-            val proxy = java.lang.reflect.Proxy.newProxyInstance(
-                listenerClass.classLoader,
-                arrayOf(listenerClass)
-            ) { _, method, args ->
-                if (method.name == "compilationFinished" && args != null && args.size >= 3) {
-                    val compileContext = args.getOrNull(3) ?: return@newProxyInstance null
-                    extractCompilerMessages(compileContext, messages, rawOutput, includeRawOutput, project)
-                }
-                null
-            }
-
-            val subscribeMethod = connection.javaClass.methods.find {
-                it.name == "subscribe" && it.parameterCount == 2
-            }
-            subscribeMethod?.invoke(connection, topic, proxy)
-
-            LOG.debug("Subscribed to CompilationStatusListener for structured build messages")
-        } catch (e: ClassNotFoundException) {
-            LOG.debug("CompilerTopics not available (no Java plugin), structured messages will be empty")
-        } catch (e: Exception) {
-            LOG.warn("Failed to subscribe to CompilationStatusListener", e)
-        }
-    }
-
-    @Suppress("UNCHECKED_CAST")
-    private fun extractCompilerMessages(
-        compileContext: Any,
-        messages: MutableList<BuildMessage>,
-        rawOutput: StringBuffer,
-        includeRawOutput: Boolean,
-        project: Project
-    ) {
-        try {
-            val categoryClass = Class.forName("com.intellij.openapi.compiler.CompilerMessageCategory")
-            val getMessagesMethod = compileContext.javaClass.getMethod("getMessages", categoryClass)
-
-            for (categoryName in listOf("ERROR", "WARNING")) {
-                val category = java.lang.Enum.valueOf(
-                    categoryClass as Class<out Enum<*>>,
-                    categoryName
-                )
-                val compilerMessages = getMessagesMethod.invoke(compileContext, category) as? Array<*> ?: continue
-
-                for (msg in compilerMessages) {
-                    if (msg == null) continue
-                    val msgClass = msg.javaClass
-
-                    val messageText = msgClass.getMethod("getMessage").invoke(msg) as? String ?: continue
-                    val virtualFile = msgClass.getMethod("getVirtualFile").invoke(msg) as? com.intellij.openapi.vfs.VirtualFile
-                    val filePath = virtualFile?.let { getRelativePath(project, it) }
-
-                    var line: Int? = null
-                    var column: Int? = null
-                    try {
-                        val navigatable = msgClass.getMethod("getNavigatable").invoke(msg)
-                        if (navigatable != null) {
-                            val openFileDescriptor = navigatable as? com.intellij.openapi.fileEditor.OpenFileDescriptor
-                            if (openFileDescriptor != null) {
-                                line = openFileDescriptor.line + 1
-                                column = openFileDescriptor.column + 1
-                            }
-                        }
-                    } catch (_: Exception) { }
-
-                    messages.add(BuildMessage(
-                        category = categoryName,
-                        message = messageText,
-                        file = filePath,
-                        line = line,
-                        column = column
-                    ))
-                }
-            }
+        BuildListenerUtils.subscribeToCompilationStatus(connection) { compileContext ->
+            messages.addAll(BuildListenerUtils.extractCompilerMessages(compileContext, project))
 
             if (includeRawOutput) {
-                for (categoryName in listOf("INFORMATION", "STATISTICS")) {
-                    try {
-                        val category = java.lang.Enum.valueOf(
-                            categoryClass as Class<out Enum<*>>,
-                            categoryName
-                        )
-                        val infoMessages = getMessagesMethod.invoke(compileContext, category) as? Array<*> ?: continue
-                        for (msg in infoMessages) {
-                            if (msg == null) continue
-                            val text = msg.javaClass.getMethod("getMessage").invoke(msg) as? String ?: continue
-                            rawOutput.append(text).append('\n')
-                        }
-                    } catch (_: Exception) { }
-                }
+                rawOutput.append(BuildListenerUtils.extractCompilerRawOutput(compileContext))
             }
-        } catch (e: Exception) {
-            LOG.warn("Failed to extract compiler messages", e)
         }
     }
 }

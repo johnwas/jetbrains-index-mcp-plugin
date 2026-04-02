@@ -207,9 +207,45 @@ class ToolsUnitTest : TestCase() {
         val properties = schema[SchemaConstants.PROPERTIES]?.jsonObject
         assertNotNull(properties)
 
-        assertNotNull("Should have file property", properties?.get(ParamNames.FILE))
-        assertNotNull("Should have startLine property", properties?.get(ParamNames.START_LINE))
-        assertNotNull("Should have endLine property", properties?.get(ParamNames.END_LINE))
+        // Existing params
+        assertNotNull("Should have project_path", properties?.get(ParamNames.PROJECT_PATH))
+        assertNotNull("Should have file", properties?.get(ParamNames.FILE))
+        assertNotNull("Should have line", properties?.get("line"))
+        assertNotNull("Should have column", properties?.get("column"))
+        assertNotNull("Should have startLine", properties?.get("startLine"))
+        assertNotNull("Should have endLine", properties?.get("endLine"))
+
+        // New params
+        assertNotNull("Should have includeBuildErrors", properties?.get(ParamNames.INCLUDE_BUILD_ERRORS))
+        assertNotNull("Should have includeTestResults", properties?.get(ParamNames.INCLUDE_TEST_RESULTS))
+        assertNotNull("Should have severity", properties?.get(ParamNames.SEVERITY))
+        assertNotNull("Should have testResultFilter", properties?.get(ParamNames.TEST_RESULT_FILTER))
+        assertNotNull("Should have maxBuildErrors", properties?.get(ParamNames.MAX_BUILD_ERRORS))
+        assertNotNull("Should have maxTestResults", properties?.get(ParamNames.MAX_TEST_RESULTS))
+
+        // file should NOT be required anymore
+        val required = schema[SchemaConstants.REQUIRED]?.jsonArray?.map { it.jsonPrimitive.content }
+        assertTrue("file should not be required", required == null || !required.contains(ParamNames.FILE))
+    }
+
+    fun testGetDiagnosticsToolSeverityEnum() {
+        val tool = GetDiagnosticsTool()
+        val properties = tool.inputSchema[SchemaConstants.PROPERTIES]?.jsonObject
+        val severityProp = properties?.get(ParamNames.SEVERITY)?.jsonObject
+
+        val enumValues = severityProp?.get("enum")?.jsonArray?.map { it.jsonPrimitive.content }
+        assertNotNull("severity should have enum values", enumValues)
+        assertEquals(listOf("all", "errors", "warnings"), enumValues)
+    }
+
+    fun testGetDiagnosticsToolTestResultFilterEnum() {
+        val tool = GetDiagnosticsTool()
+        val properties = tool.inputSchema[SchemaConstants.PROPERTIES]?.jsonObject
+        val filterProp = properties?.get(ParamNames.TEST_RESULT_FILTER)?.jsonObject
+
+        val enumValues = filterProp?.get("enum")?.jsonArray?.map { it.jsonPrimitive.content }
+        assertNotNull("testResultFilter should have enum values", enumValues)
+        assertEquals(listOf("failed", "all"), enumValues)
     }
 
     /**

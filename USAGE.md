@@ -152,14 +152,16 @@ Finds all references to a symbol across the entire project using IntelliJ's sema
       "line": 42,
       "column": 15,
       "context": "userService.findUser(id)",
-      "type": "METHOD_CALL"
+      "type": "METHOD_CALL",
+      "astPath": ["UserController", "getUser"]
     },
     {
       "file": "src/test/java/com/example/UserServiceTest.java",
       "line": 28,
       "column": 10,
       "context": "service.findUser(\"test\")",
-      "type": "METHOD_CALL"
+      "type": "METHOD_CALL",
+      "astPath": ["UserServiceTest", "testFindUser"]
     }
   ],
   "totalCount": 2
@@ -217,7 +219,8 @@ Finds the definition/declaration location of a symbol at a given source location
   "line": 15,
   "column": 17,
   "preview": "14:     \n15:     public User findUser(String id) {\n16:         return userRepository.findById(id);\n17:     }",
-  "symbolName": "findUser"
+  "symbolName": "findUser",
+  "astPath": ["UserService"]
 }
 ```
 

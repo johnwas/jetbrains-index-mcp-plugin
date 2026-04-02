@@ -37,7 +37,8 @@ class ToolModelsUnitTest : TestCase() {
             line = 25,
             column = 12,
             context = "val service = UserService()",
-            type = "METHOD_CALL"
+            type = "METHOD_CALL",
+            astPath = listOf("MyClass", "myMethod")
         )
 
         val serialized = json.encodeToString(location)
@@ -48,6 +49,7 @@ class ToolModelsUnitTest : TestCase() {
         assertEquals(12, deserialized.column)
         assertEquals("val service = UserService()", deserialized.context)
         assertEquals("METHOD_CALL", deserialized.type)
+        assertEquals(listOf("MyClass", "myMethod"), deserialized.astPath)
     }
 
     // FindUsagesResult tests
@@ -55,8 +57,8 @@ class ToolModelsUnitTest : TestCase() {
     fun testFindUsagesResultSerialization() {
         val result = FindUsagesResult(
             usages = listOf(
-                UsageLocation("file1.kt", 10, 5, "context1", "REFERENCE"),
-                UsageLocation("file2.kt", 20, 8, "context2", "METHOD_CALL")
+                UsageLocation("file1.kt", 10, 5, "context1", "REFERENCE", listOf("ClassA", "methodX")),
+                UsageLocation("file2.kt", 20, 8, "context2", "METHOD_CALL", listOf("ClassB", "methodY"))
             ),
             totalCount = 2
         )
@@ -86,7 +88,8 @@ class ToolModelsUnitTest : TestCase() {
             line = 5,
             column = 1,
             preview = "data class User(val name: String)",
-            symbolName = "User"
+            symbolName = "User",
+            astPath = listOf("UserService")
         )
 
         val serialized = json.encodeToString(result)
@@ -97,6 +100,7 @@ class ToolModelsUnitTest : TestCase() {
         assertEquals(1, deserialized.column)
         assertEquals("data class User(val name: String)", deserialized.preview)
         assertEquals("User", deserialized.symbolName)
+        assertEquals(listOf("UserService"), deserialized.astPath)
     }
 
     // TypeHierarchyResult tests
@@ -267,8 +271,197 @@ class ToolModelsUnitTest : TestCase() {
 
         assertEquals(1, deserialized.problemCount)
         assertEquals(1, deserialized.intentionCount)
-        assertEquals("Unused variable", deserialized.problems[0].message)
-        assertEquals("Add import", deserialized.intentions[0].name)
+        assertEquals("Unused variable", deserialized.problems!![0].message)
+        assertEquals("Add import", deserialized.intentions!![0].name)
+    }
+
+    // TestResultInfo tests
+
+    fun testTestResultInfoSerialization() {
+        val info = TestResultInfo(
+            name = "testLogin",
+            suite = "UserServiceTest",
+            status = "FAILED",
+            durationMs = 142,
+            errorMessage = "Expected true but was false",
+            stacktrace = "at UserServiceTest.testLogin(UserServiceTest.java:42)",
+            file = "src/test/UserServiceTest.java",
+            line = 42
+        )
+
+        val serialized = json.encodeToString(info)
+        val deserialized = json.decodeFromString<TestResultInfo>(serialized)
+
+        assertEquals("testLogin", deserialized.name)
+        assertEquals("UserServiceTest", deserialized.suite)
+        assertEquals("FAILED", deserialized.status)
+        assertEquals(142L, deserialized.durationMs)
+        assertEquals("Expected true but was false", deserialized.errorMessage)
+        assertNotNull(deserialized.stacktrace)
+        assertEquals("src/test/UserServiceTest.java", deserialized.file)
+        assertEquals(42, deserialized.line)
+    }
+
+    fun testTestResultInfoPassed() {
+        val info = TestResultInfo(
+            name = "testBasic",
+            suite = "BasicTest",
+            status = "PASSED",
+            durationMs = 5,
+            errorMessage = null,
+            stacktrace = null,
+            file = "src/test/BasicTest.java",
+            line = 10
+        )
+
+        val serialized = json.encodeToString(info)
+        val deserialized = json.decodeFromString<TestResultInfo>(serialized)
+
+        assertEquals("PASSED", deserialized.status)
+        assertNull(deserialized.errorMessage)
+        assertNull(deserialized.stacktrace)
+    }
+
+    fun testTestResultInfoNullLocation() {
+        val info = TestResultInfo(
+            name = "testSomething",
+            suite = null,
+            status = "IGNORED",
+            durationMs = null,
+            errorMessage = null,
+            stacktrace = null,
+            file = null,
+            line = null
+        )
+
+        val serialized = json.encodeToString(info)
+        val deserialized = json.decodeFromString<TestResultInfo>(serialized)
+
+        assertNull(deserialized.suite)
+        assertNull(deserialized.file)
+        assertNull(deserialized.line)
+        assertNull(deserialized.durationMs)
+    }
+
+    fun testTestResultInfoAllStatuses() {
+        val statuses = listOf("PASSED", "FAILED", "IGNORED", "ERROR")
+
+        statuses.forEach { status ->
+            val info = TestResultInfo("test", "Suite", status, 1, null, null, null, null)
+            val serialized = json.encodeToString(info)
+            val deserialized = json.decodeFromString<TestResultInfo>(serialized)
+            assertEquals(status, deserialized.status)
+        }
+    }
+
+    // TestSummary tests
+
+    fun testTestSummarySerialization() {
+        val summary = TestSummary(
+            total = 46,
+            passed = 42,
+            failed = 3,
+            ignored = 1,
+            runConfigName = "All Tests"
+        )
+
+        val serialized = json.encodeToString(summary)
+        val deserialized = json.decodeFromString<TestSummary>(serialized)
+
+        assertEquals(46, deserialized.total)
+        assertEquals(42, deserialized.passed)
+        assertEquals(3, deserialized.failed)
+        assertEquals(1, deserialized.ignored)
+        assertEquals("All Tests", deserialized.runConfigName)
+    }
+
+    fun testTestSummaryNullRunConfig() {
+        val summary = TestSummary(total = 10, passed = 10, failed = 0, ignored = 0, runConfigName = null)
+
+        val serialized = json.encodeToString(summary)
+        val deserialized = json.decodeFromString<TestSummary>(serialized)
+
+        assertNull(deserialized.runConfigName)
+    }
+
+    // Enhanced DiagnosticsResult tests
+
+    fun testDiagnosticsResultWithBuildErrors() {
+        val result = DiagnosticsResult(
+            buildErrors = listOf(
+                BuildMessage("ERROR", "Unresolved reference: foo", "src/Main.kt", 25, 12)
+            ),
+            buildErrorCount = 1,
+            buildWarningCount = 0,
+            buildErrorsTruncated = false,
+            buildTimestamp = 1711800000000L
+        )
+
+        val serialized = json.encodeToString(result)
+        val deserialized = json.decodeFromString<DiagnosticsResult>(serialized)
+
+        assertNull(deserialized.problems)
+        assertNull(deserialized.intentions)
+        assertNotNull(deserialized.buildErrors)
+        assertEquals(1, deserialized.buildErrors!!.size)
+        assertEquals(1711800000000L, deserialized.buildTimestamp)
+        assertFalse(deserialized.buildErrorsTruncated!!)
+    }
+
+    fun testDiagnosticsResultWithTestResults() {
+        val result = DiagnosticsResult(
+            testResults = listOf(
+                TestResultInfo("testLogin", "AuthTest", "FAILED", 100, "assertion failed", null, "AuthTest.kt", 10)
+            ),
+            testSummary = TestSummary(total = 5, passed = 4, failed = 1, ignored = 0, runConfigName = "Tests"),
+            testResultsTruncated = false
+        )
+
+        val serialized = json.encodeToString(result)
+        val deserialized = json.decodeFromString<DiagnosticsResult>(serialized)
+
+        assertNull(deserialized.problems)
+        assertNull(deserialized.buildErrors)
+        assertNotNull(deserialized.testResults)
+        assertEquals(1, deserialized.testResults!!.size)
+        assertEquals(5, deserialized.testSummary!!.total)
+    }
+
+    fun testDiagnosticsResultAllSourcesCombined() {
+        val result = DiagnosticsResult(
+            problems = listOf(ProblemInfo("Unused variable", "WARNING", "Main.kt", 10, 5, 10, 15)),
+            intentions = listOf(IntentionInfo("Remove variable", null)),
+            problemCount = 1,
+            intentionCount = 1,
+            buildErrors = listOf(BuildMessage("ERROR", "Build failed", "Main.kt", 10, 5)),
+            buildErrorCount = 1,
+            buildWarningCount = 0,
+            buildErrorsTruncated = false,
+            buildTimestamp = 1711800000000L,
+            testResults = listOf(TestResultInfo("test1", "Suite1", "PASSED", 5, null, null, null, null)),
+            testSummary = TestSummary(1, 1, 0, 0, "Test"),
+            testResultsTruncated = false
+        )
+
+        val serialized = json.encodeToString(result)
+        val deserialized = json.decodeFromString<DiagnosticsResult>(serialized)
+
+        assertNotNull(deserialized.problems)
+        assertNotNull(deserialized.buildErrors)
+        assertNotNull(deserialized.testResults)
+    }
+
+    fun testDiagnosticsResultAllNulls() {
+        val result = DiagnosticsResult()
+
+        val serialized = json.encodeToString(result)
+        val deserialized = json.decodeFromString<DiagnosticsResult>(serialized)
+
+        assertNull(deserialized.problems)
+        assertNull(deserialized.intentions)
+        assertNull(deserialized.buildErrors)
+        assertNull(deserialized.testResults)
+        assertNull(deserialized.buildTimestamp)
     }
 
     // ProblemInfo tests

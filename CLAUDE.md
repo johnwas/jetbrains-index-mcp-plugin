@@ -370,7 +370,7 @@ Tools are organized by IDE availability.
 - `ide_find_file` - Search for files by name using IDE's file index
 - `ide_search_text` - Text search using IDE's pre-built word index with context filtering
 - `ide_read_file` - Read file content by path or qualified name, including library/jar sources (disabled by default)
-- `ide_diagnostics` - Analyze file for problems and available intentions
+- `ide_diagnostics` - Unified diagnostics tool: per-file code analysis (errors, warnings, intentions), build output from last build, and test results from open test run tabs. Supports `includeBuildErrors`, `includeTestResults`, `severity` filter, `testResultFilter`, `maxBuildErrors`, `maxTestResults`. The `file` parameter is now optional.
 - `ide_index_status` - Check indexing status (dumb/smart mode)
 - `ide_sync_files` - Force sync IDE's virtual file system and PSI cache with external file changes
 - `ide_build_project` - Build project using IDE's build system (JPS, Gradle, Maven). Returns structured errors/warnings with file locations when available (null counts = no messages captured, not 0). Uses CompilationStatusListener for JPS builds and BuildProgressListener for Gradle/Maven builds. Supports workspace sub-project targeting via `project_path`. (disabled by default)

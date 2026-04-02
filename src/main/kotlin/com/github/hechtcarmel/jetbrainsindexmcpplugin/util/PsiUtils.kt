@@ -1,10 +1,12 @@
 package com.github.hechtcarmel.jetbrainsindexmcpplugin.util
 
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.roots.OrderEnumerator
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VfsUtil
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.vfs.VirtualFileManager
+import com.intellij.openapi.vfs.toNioPathOrNull
 import com.intellij.psi.PsiDocumentManager
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiFile
@@ -117,6 +119,9 @@ object PsiUtils {
         
         // Handle already-formatted jar:// URLs
         if (path.startsWith("jar://")) {
+            val jarPath = path.removePrefix("jar://").substringBefore("!/")
+            val projectLibraryJars = project.getProjectLibraryJars()
+            if (projectLibraryJars.none { jarPath.startsWith(it) }) return null
             return virtualFileManager.findFileByUrl(path)
         }
 
@@ -130,6 +135,12 @@ object PsiUtils {
                 val homeExpandedJarPath = expandHome(jarPath)
                 val absoluteJarPath = resolveAbsolutePathString(homeExpandedJarPath, listOfNotNull(project.basePath).asSequence())
                     ?: homeExpandedJarPath
+
+                val projectLibraryJars = project.getProjectLibraryJars()
+
+                if (projectLibraryJars.none { absoluteJarPath.startsWith(it) }) {
+                    return null
+                }
                 
                 // Construct the jar URL: jar://absolute/path/to/file.jar!/internal/path
                 val jarUrl = "jar://$absoluteJarPath!/$internalPath"
@@ -215,6 +226,26 @@ object PsiUtils {
         return lines.subList(clampedStart, clampedEnd + 1).joinToString("\n")
     }
 
+    /**
+     * Returns the chain of named PSI ancestors enclosing [element], ordered from the
+     * outermost (closest to file root) to the innermost (immediate named parent).
+     * The [element] itself is never included, nor are anonymous (unnamed) nodes.
+     */
+    fun getAstPath(element: PsiElement): List<String> {
+        val ancestors = mutableListOf<String>()
+        var current: PsiElement? = element.parent
+        while (current != null && current !is PsiFile) {
+            if (current is PsiNamedElement) {
+                val name = current.name
+                if (!name.isNullOrEmpty()) {
+                    ancestors.add(name)
+                }
+            }
+            current = current.parent
+        }
+        return ancestors.asReversed()
+    }
+
     fun findNamedElement(element: PsiElement): PsiNamedElement? {
         var current: PsiElement? = element
         while (current != null) {
@@ -247,3 +278,12 @@ object PsiUtils {
         return element.navigationElement ?: element
     }
 }
+
+private fun Project.getProjectLibraryJars(): List<String> = OrderEnumerator.orderEntries(this)
+    .librariesOnly()
+    .classes()
+    .roots
+    .mapNotNull { root ->
+        root.toNioPathOrNull()?.toString()
+            ?: root.path.takeIf { it.contains("!/") }?.substringBefore("!/")
+    }

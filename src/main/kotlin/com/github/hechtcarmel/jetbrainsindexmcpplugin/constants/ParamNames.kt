@@ -60,4 +60,12 @@ object ParamNames {
     const val REBUILD = "rebuild"
     const val INCLUDE_RAW_OUTPUT = "includeRawOutput"
     const val TIMEOUT_SECONDS = "timeoutSeconds"
+
+    // Diagnostics parameters
+    const val INCLUDE_BUILD_ERRORS = "includeBuildErrors"
+    const val INCLUDE_TEST_RESULTS = "includeTestResults"
+    const val SEVERITY = "severity"
+    const val TEST_RESULT_FILTER = "testResultFilter"
+    const val MAX_BUILD_ERRORS = "maxBuildErrors"
+    const val MAX_TEST_RESULTS = "maxTestResults"
 }

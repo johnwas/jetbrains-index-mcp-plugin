@@ -128,6 +128,7 @@ class ToolExecutionIntegrationTest : BasePlatformTestCase() {
         }
 
         assertTrue("Full preview should include method name", definition.preview.contains("doWork"))
+        assertEquals("astPath should contain enclosing class", listOf("Service"), definition.astPath)
     }
 
     fun testReadFileToolValidation() = runBlocking {

@@ -92,7 +92,8 @@ class FindDefinitionTool : AbstractMcpTool() {
                     line = 1,
                     column = 1,
                     preview = "Package directory: $dirPath",
-                    symbolName = effectiveTarget.name
+                    symbolName = effectiveTarget.name,
+                    astPath = PsiUtils.getAstPath(effectiveTarget)
                 ))
             }
             // PsiPackage is Java-plugin-only; use reflection to avoid NoClassDefFoundError in non-Java IDEs
@@ -112,7 +113,8 @@ class FindDefinitionTool : AbstractMcpTool() {
                             line = 1,
                             column = 1,
                             preview = "Package: $qualifiedName",
-                            symbolName = qualifiedName
+                            symbolName = qualifiedName,
+                            astPath = emptyList()
                         ))
                     }
                 }
@@ -165,7 +167,8 @@ class FindDefinitionTool : AbstractMcpTool() {
                 line = targetLine,
                 column = targetColumn,
                 preview = preview,
-                symbolName = symbolName
+                symbolName = symbolName,
+                astPath = PsiUtils.getAstPath(effectiveTarget)
             ))
         }
     }
