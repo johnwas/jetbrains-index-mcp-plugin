@@ -39,6 +39,7 @@ object LanguageHandlerRegistry {
     private val implementationsHandlers = ConcurrentHashMap<String, ImplementationsHandler>()
     private val callHierarchyHandlers = ConcurrentHashMap<String, CallHierarchyHandler>()
     private val symbolSearchHandlers = ConcurrentHashMap<String, SymbolSearchHandler>()
+    private val symbolReferenceHandlers = ConcurrentHashMap<String, SymbolReferenceHandler>()
     private val superMethodsHandlers = ConcurrentHashMap<String, SuperMethodsHandler>()
     private val structureHandlers = ConcurrentHashMap<String, StructureHandler>()
 
@@ -67,6 +68,7 @@ object LanguageHandlerRegistry {
             "Implementations=${implementationsHandlers.size}, " +
             "CallHierarchy=${callHierarchyHandlers.size}, " +
             "SymbolSearch=${symbolSearchHandlers.size}, " +
+            "SymbolReference=${symbolReferenceHandlers.size}, " +
             "SuperMethods=${superMethodsHandlers.size}, " +
             "Structure=${structureHandlers.size}")
     }
@@ -80,6 +82,7 @@ object LanguageHandlerRegistry {
         implementationsHandlers.clear()
         callHierarchyHandlers.clear()
         symbolSearchHandlers.clear()
+        symbolReferenceHandlers.clear()
         superMethodsHandlers.clear()
         structureHandlers.clear()
         initialized = false
@@ -105,6 +108,11 @@ object LanguageHandlerRegistry {
     fun registerSymbolSearchHandler(handler: SymbolSearchHandler) {
         symbolSearchHandlers[handler.languageId] = handler
         LOG.info("Registered SymbolSearchHandler for ${handler.languageId}")
+    }
+
+    fun registerSymbolReferenceHandler(handler: SymbolReferenceHandler) {
+        symbolReferenceHandlers[handler.languageId] = handler
+        LOG.info("Registered SymbolReferenceHandler for ${handler.languageId}")
     }
 
     fun registerSuperMethodsHandler(handler: SuperMethodsHandler) {
@@ -222,8 +230,32 @@ object LanguageHandlerRegistry {
     fun getSupportedLanguagesForSuperMethods(): List<String> =
         superMethodsHandlers.filter { it.value.isAvailable() }.keys.toList()
 
+    fun getSupportedLanguagesForSymbolReference(): List<String> =
+        symbolReferenceHandlers.filter { it.value.isAvailable() }.keys.toList()
+
     fun getSupportedLanguagesForStructure(): List<String> =
         structureHandlers.filter { it.value.isAvailable() }.keys.toList()
+
+    /**
+     * Gets a list of human-readable language names that have symbol reference handlers available.
+     *
+     * @return A list of language names (e.g., "Java", "Python") that have available symbol reference handlers.
+     */
+    fun getSupportedLanguageNamesForSymbolReference(): List<String> {
+        return symbolReferenceHandlers.filter { it.value.isAvailable() }.map { it.value.languageName }
+    }
+
+    /**
+     * Gets a symbol reference handler for the given language name.
+     *
+     * @param languageName The language name (e.g., "Java", "Kotlin")
+     * @return The handler if available, or null if no handler exists for the language
+     */
+    fun getSymbolReferenceHandlerByLanguageName(languageName: String): SymbolReferenceHandler? {
+        return symbolReferenceHandlers.values.firstOrNull {
+            it.isAvailable() && it.languageName.equals(languageName, ignoreCase = true)
+        }
+    }
 
     // Private helper methods
 

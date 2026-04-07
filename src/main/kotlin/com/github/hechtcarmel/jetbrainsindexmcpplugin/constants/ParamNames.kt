@@ -41,6 +41,9 @@ object ParamNames {
     const val FQN = "fqn"
     const val QUALIFIED_NAME = "qualifiedName"
 
+    // Symbol reference parameter
+    const val SYMBOL = "symbol"
+
     // Symbol search parameters
     const val QUERY = "query"
     const val INCLUDE_LIBRARIES = "includeLibraries"

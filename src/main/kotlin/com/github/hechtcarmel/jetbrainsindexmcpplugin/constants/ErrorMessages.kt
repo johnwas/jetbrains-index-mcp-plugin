@@ -1,5 +1,7 @@
 package com.github.hechtcarmel.jetbrainsindexmcpplugin.constants
 
+fun String.toArgumentFailure(): Result<Nothing> = Result.failure(IllegalArgumentException(this))
+
 object ErrorMessages {
     // Parameter validation errors
     fun missingRequiredParam(param: String) = "Missing required parameter: $param"
@@ -16,6 +18,28 @@ object ErrorMessages {
     const val NO_NAMED_ELEMENT = "No named element at position"
     const val COULD_NOT_RESOLVE_SYMBOL = "Could not resolve symbol"
     const val DEFINITION_DOCUMENT_NOT_FOUND = "Could not get document for definition"
+
+    // Symbol resolution errors
+    const val SYMBOL_AND_POSITION_EXCLUSIVE =
+        "Cannot specify both language+symbol and file+line+column. Use one or the other."
+    const val SYMBOL_OR_POSITION_REQUIRED =
+        "Must specify either file+line+column or language+symbol to identify the target element."
+    fun missingParamForSymbol(param: String) =
+        "Missing required parameter: $param (required when using symbol)"
+    fun missingParamForPosition(param: String, others: String) =
+        "Missing required parameter: $param (required when using $others)"
+    fun noSymbolReferenceHandler(language: String, supported: List<String>) =
+        "No symbol reference handler available for language: $language. Supported languages: ${supported.joinToString(", ")}"
+    fun invalidSymbolFormat(symbol: String, examples: List<String>) =
+        "Symbol '$symbol' does not match expected format. Examples: ${examples.joinToString(", ")}"
+    fun typeNotFound(typeFqn: String, projectName: String) =
+        "Type '$typeFqn' not found in project '$projectName'"
+    fun memberNotFoundInType(memberName: String, typeFqn: String) =
+        "No member '$memberName' found in type '$typeFqn'"
+    fun noMethodsMatch(memberPart: String, typeFqn: String, signatures: List<String>) =
+        "No methods match $memberPart in type $typeFqn.\nAvailable overloads:\n${signatures.joinToString(";\n")}"
+    fun multipleMethodsMatch(memberPart: String, typeFqn: String, signatures: List<String>) =
+        "Multiple methods match $memberPart in type $typeFqn.\nAvailable overloads:\n${signatures.joinToString(";\n")}"
 
     // Project resolution errors (used as error codes in JSON)
     const val ERROR_NO_PROJECT_OPEN = "no_project_open"

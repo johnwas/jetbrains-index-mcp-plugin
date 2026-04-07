@@ -10,6 +10,7 @@ import com.intellij.openapi.application.EDT
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.project.Project
 import com.intellij.psi.PsiElement
+import com.intellij.psi.PsiFile
 import com.intellij.psi.PsiNamedElement
 import com.intellij.psi.util.PsiTreeUtil
 import com.intellij.refactoring.rename.RenameProcessor
@@ -44,7 +45,11 @@ class RenameSymbolTool : AbstractMcpTool() {
     override val name = "ide_refactor_rename"
 
     override val description = """
-        Rename a symbol and update all references across the project. Use instead of find-and-replace for safe, semantic renaming that handles all usages correctly. Supports undo (Ctrl+Z).
+        Rename a symbol or file and update all references across the project. Use instead of find-and-replace for safe, semantic renaming that handles all usages correctly. Supports undo (Ctrl+Z).
+
+        Two modes:
+        - **Symbol rename** (file + line + column + newName): Rename a symbol at a specific position.
+        - **File rename** (file + newName, WITHOUT line/column): Rename the file itself. Works for all file types including binary files (images, etc.). Especially useful for Android resource files (.webp, .png, .xml in res/) where it updates all resource references across the project.
 
         Automatically renames related elements: getters/setters, overriding methods, constructor parameters ↔ fields, test classes.
 
@@ -61,16 +66,19 @@ class RenameSymbolTool : AbstractMcpTool() {
 
         Returns: affected files list and change count. Modifies source files.
 
-        Parameters: file + line + column + newName (all required), overrideStrategy + relatedRenamingStrategy (optional).
+        Parameters: file + newName (required). line + column (optional — omit for file rename). overrideStrategy + relatedRenamingStrategy (optional).
 
-        Example: {"file": "src/UserService.java", "line": 15, "column": 18, "newName": "CustomerService"}
+        Examples:
+        - Symbol rename: {"file": "src/UserService.java", "line": 15, "column": 18, "newName": "CustomerService"}
+        - File rename: {"file": "res/mipmap-hdpi/ic_launcher.webp", "newName": "ic_app_icon.webp"}
     """.trimIndent()
 
     override val inputSchema: JsonObject = SchemaBuilder.tool()
         .projectPath()
         .file(description = "Path to file relative to project root. REQUIRED.")
-        .lineAndColumn()
-        .stringProperty("newName", "The new name for the symbol. REQUIRED.", required = true)
+        .intProperty("line", "1-based line number. Required for symbol rename, omit for file rename.")
+        .intProperty("column", "1-based column number. Required for symbol rename, omit for file rename.")
+        .stringProperty("newName", "The new name for the symbol or file. REQUIRED. For file renames, include the file extension (e.g., 'new_name.webp').", required = true)
         .enumProperty(
             "overrideStrategy",
             "Strategy when renaming a method that overrides a base method. " +
@@ -103,9 +111,7 @@ class RenameSymbolTool : AbstractMcpTool() {
         val file = arguments["file"]?.jsonPrimitive?.content
             ?: return createErrorResult("Missing required parameter: file")
         val line = arguments["line"]?.jsonPrimitive?.int
-            ?: return createErrorResult("Missing required parameter: line")
         val column = arguments["column"]?.jsonPrimitive?.int
-            ?: return createErrorResult("Missing required parameter: column")
         val newName = arguments["newName"]?.jsonPrimitive?.content
             ?: return createErrorResult("Missing required parameter: newName")
 
@@ -123,13 +129,23 @@ class RenameSymbolTool : AbstractMcpTool() {
             return createErrorResult("newName cannot be blank")
         }
 
+        // Validate that line and column are either both present or both absent
+        val isFileRename = line == null && column == null
+        if (!isFileRename && (line == null || column == null)) {
+            return createErrorResult("Both 'line' and 'column' must be provided for symbol rename, or both omitted for file rename.")
+        }
+
         requireSmartMode(project)
 
         // ═══════════════════════════════════════════════════════════════════════
         // PHASE 1: BACKGROUND - Find element and validate (suspending read action)
         // ═══════════════════════════════════════════════════════════════════════
         val validation = suspendingReadAction {
-            validateAndPrepare(project, file, line, column, newName)
+            if (isFileRename) {
+                validateAndPrepareFileRename(project, file, newName)
+            } else {
+                validateAndPrepare(project, file, line!!, column!!, newName)
+            }
         }
 
         if (validation.error != null) {
@@ -249,6 +265,45 @@ class RenameSymbolTool : AbstractMcpTool() {
     }
 
     /**
+     * Validates and prepares a file rename (no line/column — renames the file itself).
+     *
+     * Uses the PsiFile directly as the rename target, which works for all file types
+     * including binary files (images, etc.). The RenameProcessor and its
+     * RenamePsiElementProcessor handle language-specific behavior (e.g., Android
+     * resource renaming updates all XML references).
+     *
+     * Skips language-specific identifier validation since file names follow different
+     * rules than code identifiers.
+     */
+    private fun validateAndPrepareFileRename(
+        project: Project,
+        file: String,
+        newName: String
+    ): RenameValidation {
+        val psiFile = getPsiFile(project, file)
+            ?: return RenameValidation(
+                element = DummyNamedElement,
+                oldName = "",
+                error = "File not found: $file"
+            )
+
+        val oldName = psiFile.name
+
+        if (oldName == newName) {
+            return RenameValidation(
+                element = DummyNamedElement,
+                oldName = oldName,
+                error = "New name is the same as the current name"
+            )
+        }
+
+        return RenameValidation(
+            element = psiFile,
+            oldName = oldName
+        )
+    }
+
+    /**
      * Checks for naming conflicts that would prevent the rename.
      * Returns an error message if conflicts exist, null otherwise.
      */
@@ -323,15 +378,28 @@ class RenameSymbolTool : AbstractMcpTool() {
         // - "ask": delegate to substituteElementToRename (shows dialog)
         val targetElement = resolveRenameTarget(element, overrideStrategy)
 
+        // Compute the effective name for the rename target.
+        //
+        // When a PsiFile is substituted to a non-PsiFile (e.g., Android resource element),
+        // the target's getName() returns the resource name WITHOUT file extension (e.g.,
+        // "ic_launcher" not "ic_launcher.webp"). The RenameProcessor calls setName() with
+        // the new name, and the Android plugin's prepareRenaming() appends extensions when
+        // generating related file names. Passing a name WITH extension would cause double
+        // extensions on related files (e.g., "app_icon.webp.webp").
+        //
+        // Conversely, when the target remains a PsiFile (no substitution), getName() returns
+        // the full filename WITH extension, and setName() expects the same format.
+        val effectiveNewName = computeEffectiveNewName(element, targetElement, newName)
+
         // Create the RenameProcessor with language-appropriate settings.
         // NOTE: We intentionally DON'T search in comments/text occurrences to avoid
         // non-code usage dialogs. The basic rename is more predictable for agents.
         // When relatedRenamingStrategy is "ask", use a standard RenameProcessor so the
         // IDE shows its built-in dialog for each automatic renamer.
         val renameProcessor = if (relatedRenamingStrategy == "ask") {
-            RenameProcessor(project, targetElement, newName, false, false)
+            RenameProcessor(project, targetElement, effectiveNewName, false, false)
         } else {
-            HeadlessRenameProcessor(project, targetElement, newName, false, false)
+            HeadlessRenameProcessor(project, targetElement, effectiveNewName, false, false)
         }
 
         // Register automatic renamers based on the relatedRenamingStrategy.
@@ -345,7 +413,7 @@ class RenameSymbolTool : AbstractMcpTool() {
         }
 
         // Add constructor parameter -> field relation up front.
-        addParameterFieldRelations(project, targetElement, newName, renameProcessor)
+        addParameterFieldRelations(project, targetElement, effectiveNewName, renameProcessor)
 
         // Disable preview dialog for headless operation
         renameProcessor.setPreviewUsages(false)
@@ -361,6 +429,64 @@ class RenameSymbolTool : AbstractMcpTool() {
         }
 
         return Pair(affectedFiles.size, relatedRenamesCount)
+    }
+
+    /**
+     * Computes the effective name for the rename target, accounting for element substitution
+     * during [RenamePsiElementProcessor.prepareRenaming].
+     *
+     * When a `PsiFile` is passed to `RenameProcessor`, some processors (e.g., Android's
+     * `ResourceReferenceRenameProcessor`) swap the `PsiFile` for a higher-level element
+     * (like `ResourceReferencePsiElement`) in `prepareRenaming()`. The substitute element
+     * uses resource-style naming (without file extension), while `PsiFile` uses filename-style
+     * naming (with extension).
+     *
+     * In the IDE's own rename dialog, this is handled naturally: the dialog shows the element's
+     * `getName()` value, so after substitution the user sees the resource name (no extension).
+     * For our headless flow, we must detect this substitution and adjust `newName` accordingly.
+     *
+     * We probe `prepareRenaming` with a temporary map to detect if substitution would occur.
+     * This is safe because `prepareRenaming` only creates lightweight wrapper objects.
+     *
+     * Additionally, when no substitution occurs and the target remains a `PsiFile`, if the
+     * user provided a name without extension, the original file's extension is preserved.
+     */
+    private fun computeEffectiveNewName(
+        element: PsiNamedElement,
+        targetElement: PsiNamedElement,
+        newName: String
+    ): String {
+        if (element !is PsiFile) return newName
+
+        // Probe: check if prepareRenaming would substitute this PsiFile for a different element.
+        // Processors like Android's ResourceReferenceRenameProcessor remove the PsiFile from
+        // allRenames and add a ResourceReferencePsiElement instead. That substitute uses
+        // resource-style naming (no file extension).
+        val processor = RenamePsiElementProcessor.forElement(targetElement)
+        val probeRenames = linkedMapOf<PsiElement, String>(targetElement to newName)
+        try {
+            processor.prepareRenaming(targetElement, newName, probeRenames)
+        } catch (_: Exception) {
+            // If probing fails, fall through to default behavior
+        }
+
+        val wasSubstituted = targetElement !in probeRenames && probeRenames.isNotEmpty()
+
+        if (wasSubstituted) {
+            // Element will be substituted (e.g., Android resource) — strip file extension.
+            // The substitute's handleElementRename() re-appends extensions per density variant.
+            val nameWithoutExt = newName.substringBeforeLast('.')
+            return if (nameWithoutExt.isNotEmpty() && nameWithoutExt != newName) nameWithoutExt else newName
+        }
+
+        // No substitution — target remains a PsiFile. PsiFile.setName() expects full filename.
+        // If the user omitted the extension, preserve the original file's extension.
+        val originalExt = element.name.substringAfterLast('.', "")
+        if (originalExt.isNotEmpty() && !newName.contains('.')) {
+            return "$newName.$originalExt"
+        }
+
+        return newName
     }
 
     /**
@@ -591,13 +717,34 @@ class RenameSymbolTool : AbstractMcpTool() {
     }
 
     /**
-     * Finds the named element from a PSI element (traverses up if needed).
+     * Finds the named element from a PSI element.
+     *
+     * First checks if the element itself is a named element (direct declaration hit).
+     * Then checks if the element or its close ancestors have PSI references that resolve
+     * to a named declaration — this handles cases like Android XML resource references
+     * (`@+id/Foo`) where the cursor is inside a reference, not on a declaration.
+     * Falls back to walking up the tree for the nearest [PsiNamedElement].
      */
     private fun findNamedElement(element: PsiElement): PsiNamedElement? {
         if (element is PsiNamedElement && element.name != null) {
             return element
         }
-        return PsiTreeUtil.getParentOfType(element, PsiNamedElement::class.java)
+
+        var current: PsiElement? = element
+        while (current != null) {
+            for (reference in current.references) {
+                val resolved = reference.resolve()
+                if (resolved is PsiNamedElement && resolved.name != null) {
+                    return resolved
+                }
+            }
+            if (current is PsiNamedElement && current.name != null) {
+                return current
+            }
+            current = current.parent
+        }
+
+        return null
     }
 
     /**

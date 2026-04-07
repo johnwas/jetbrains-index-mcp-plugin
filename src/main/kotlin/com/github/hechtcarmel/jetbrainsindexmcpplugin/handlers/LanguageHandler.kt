@@ -4,6 +4,7 @@ import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.models.StructureNode
 import com.intellij.openapi.project.Project
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiFile
+import com.intellij.psi.PsiNamedElement
 
 /**
  * Base interface for language-specific handlers.
@@ -264,6 +265,33 @@ data class SuperMethodData(
     val depth: Int,
     val language: String
 )
+
+/**
+ * Handler for resolving symbol reference strings to PSI elements.
+ *
+ * Resolves fully qualified symbol references (e.g., `com.example.MyClass#method(String)`)
+ * to PSI elements.
+ */
+interface SymbolReferenceHandler : LanguageHandler<PsiNamedElement> {
+    /**
+     * The language name this handler supports.
+     *
+     * Currently implemented for "Java". Future handlers may use "Kotlin", "Python", "JavaScript", etc.
+     *
+     * This is the user-facing language name used in the `language` tool parameter.
+     * Should match the [com.intellij.lang.Language.displayName] (case-insensitive matching is used).
+     */
+    val languageName: String
+
+    /**
+     * Resolves a symbol reference string to a PSI element.
+     *
+     * @param project The project context
+     * @param symbol The symbol reference string (e.g., `com.example.MyClass#method(String)`)
+     * @return A [Result] containing the resolved element or a failure
+     */
+    fun resolveSymbol(project: Project, symbol: String): Result<PsiNamedElement>
+}
 
 /**
  * Handler for file structure operations.

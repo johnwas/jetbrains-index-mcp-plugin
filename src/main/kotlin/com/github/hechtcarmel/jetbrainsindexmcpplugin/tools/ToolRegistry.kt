@@ -207,13 +207,15 @@ class ToolRegistry {
         val symbolSearchLangs = LanguageHandlerRegistry.getSupportedLanguagesForSymbolSearch()
         val superMethodsLangs = LanguageHandlerRegistry.getSupportedLanguagesForSuperMethods()
         val structureLangs = LanguageHandlerRegistry.getSupportedLanguagesForStructure()
+        val symbolReferenceLangs = LanguageHandlerRegistry.getSupportedLanguagesForSymbolReference()
 
         LOG.info("Language support - TypeHierarchy: $typeHierarchyLangs, " +
             "Implementations: $implementationLangs, " +
             "CallHierarchy: $callHierarchyLangs, " +
             "SymbolSearch: $symbolSearchLangs, " +
             "SuperMethods: $superMethodsLangs, " +
-            "Structure: $structureLangs")
+            "Structure: $structureLangs, " +
+            "SymbolReference: $symbolReferenceLangs")
     }
 
     /**

@@ -31,4 +31,6 @@ object SchemaConstants {
     const val DESC_TARGET_PACKAGE = "Target package for the move operation"
     const val DESC_DIRECTION = "Direction for hierarchy traversal"
     const val DESC_MAX_RESULTS = "Maximum number of results to return"
+    const val DESC_SYMBOL = "Fully qualified symbol reference. Format: 'com.example.ClassName' or 'com.example.ClassName#memberName'. Omit generics parameters."
+    const val DESC_LANGUAGE = "Language of the symbol. Required when using 'symbol' parameter."
 }

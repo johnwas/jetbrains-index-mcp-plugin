@@ -1,5 +1,6 @@
 package com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.navigation
 
+import com.github.hechtcarmel.jetbrainsindexmcpplugin.constants.ErrorMessages
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.constants.ParamNames
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.constants.ToolNames
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.handlers.LanguageHandlerRegistry
@@ -11,8 +12,6 @@ import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.models.SuperMethodsR
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.schema.SchemaBuilder
 import com.intellij.openapi.project.Project
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.int
-import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * Tool for finding super methods across multiple languages.
@@ -34,30 +33,28 @@ class FindSuperMethodsTool : AbstractMcpTool() {
 
         Returns: full hierarchy chain from immediate parent (depth=1) to root, with file locations (line/column) and containing class info.
 
-        Parameters: file + line + column (required). Position can be anywhere within the method body.
+        Target (mutually exclusive):
+        - file + line + column: position-based lookup (position can be anywhere within the method body)
+        - language + symbol: fully qualified symbol reference
 
         Example: {"file": "src/UserServiceImpl.java", "line": 25, "column": 10}
+        Example: {"language": "Java", "symbol": "com.example.UserServiceImpl#getUser(String)"}
     """.trimIndent()
 
     override val inputSchema: JsonObject = SchemaBuilder.tool()
         .projectPath()
-        .file()
-        .lineAndColumn()
+        .file(required = false)
+        .lineAndColumn(required = false)
+        .languageAndSymbol(required = false)
         .build()
 
     override suspend fun doExecute(project: Project, arguments: JsonObject): ToolCallResult {
-        val file = arguments[ParamNames.FILE]?.jsonPrimitive?.content
-            ?: return createErrorResult("Missing required parameter: ${ParamNames.FILE}")
-        val line = arguments[ParamNames.LINE]?.jsonPrimitive?.int
-            ?: return createErrorResult("Missing required parameter: ${ParamNames.LINE}")
-        val column = arguments[ParamNames.COLUMN]?.jsonPrimitive?.int
-            ?: return createErrorResult("Missing required parameter: ${ParamNames.COLUMN}")
-
         requireSmartMode(project)
 
         return suspendingReadAction {
-            val element = findPsiElement(project, file, line, column)
-                ?: return@suspendingReadAction createErrorResult("No element found at $file:$line:$column")
+            val element = resolveElementFromArguments(project, arguments).getOrElse {
+                return@suspendingReadAction createErrorResult(it.message ?: ErrorMessages.COULD_NOT_RESOLVE_SYMBOL)
+            }
 
             // Find appropriate handler for this element's language
             val handler = LanguageHandlerRegistry.getSuperMethodsHandler(element)
@@ -70,8 +67,10 @@ class FindSuperMethodsTool : AbstractMcpTool() {
 
             val superMethodsData = handler.findSuperMethods(element, project)
             if (superMethodsData == null) {
+                val isSymbolMode = arguments[ParamNames.LANGUAGE] != null
                 return@suspendingReadAction createErrorResult(
-                    "No method found at position. Ensure the position is within a method declaration or body."
+                    if (isSymbolMode) "No method found for the specified symbol. Ensure the symbol refers to a method declaration."
+                    else "No method found at position. Ensure the position is within a method declaration or body."
                 )
             }
 

@@ -4,6 +4,29 @@
 
 ## [Unreleased]
 
+## [4.10.0] - 2026-04-06
+### Added
+- **Symbol reference resolution for position-based tools** — Five tools now accept `language` + `symbol` as an alternative to `file` + `line` + `column` for identifying the target element. The two parameter groups are mutually exclusive. Unlocks the ability to directly reference symbols from third-party libraries.
+
+  Currently supported for Java; extensible to other languages via `SymbolReferenceHandler`. Symbol format uses JavaDoc-style member references: `com.example.ClassName`, `com.example.ClassName#memberName`, or `com.example.ClassName#method(ParamType1, ParamType2)`.
+
+  - Affected tools: `ide_find_references`, `ide_find_definition`, `ide_call_hierarchy`, `ide_find_implementations`, `ide_find_super_methods`
+  - New handler interface: `SymbolReferenceHandler` with `JavaSymbolReferenceHandler` implementation
+  - New `resolveElementFromArguments()` helper in `AbstractMcpTool` for unified element resolution
+  - New `languageAndSymbol()` builder method in `SchemaBuilder`
+
+## [4.9.3] - 2026-04-04
+### Added
+- **`ide_refactor_rename` file rename mode** — The `line` and `column` parameters are now optional. Omit them to rename the file itself instead of a symbol within it. Works for all file types including binary files (`.webp`, `.png`, `.jpg`). Especially useful for Android resource files where it updates all resource references across the project. Fixes [#115](https://github.com/hechtcarmel/jetbrains-index-mcp-plugin/issues/115).
+
+### Fixed
+- **`ide_refactor_rename` file rename correctly handles Android resource naming** — When renaming Android resource files (drawables, mipmaps, etc.), the tool now probes `RenamePsiElementProcessor.prepareRenaming()` to detect element substitution. If the `PsiFile` will be substituted for a resource element, the file extension is stripped from `newName` to match the SDK's resource naming convention. This prevents double extensions (e.g., `app_icon.webp.webp`) on related DPI variants and corrupted `R.drawable` references.
+- **`ide_refactor_safe_delete` now detects Android resource references for file deletion** — Previously, deleting Android resource files (e.g., `backup_rules.xml`) did not detect `@xml/` or `@drawable/` references in other XML files, allowing deletion despite active references. The tool now checks three layers: direct file references, resource element references (via `prepareRenaming` probe), and top-level symbol references. This correctly blocks deletion when the file is referenced via the Android resource system.
+
+## [4.9.2] - 2026-04-02
+### Fixed
+- **`ide_refactor_rename` renamed XML attribute name instead of referenced resource** — When renaming inside an XML attribute value (e.g., `android:id="@+id/XXTVProgress"`), the tool incorrectly renamed the attribute name (`android:id`) instead of the referenced resource ID. Now resolves PSI references before falling back to tree-walking, so the rename correctly targets the referenced declaration. Fixes [#113](https://github.com/hechtcarmel/jetbrains-index-mcp-plugin/issues/113).
+
 ## [4.9.1] - 2026-04-01
 ### Fixed
 - **Path traversal protection for file operations** — All file-based tools now validate that resolved paths stay within project boundaries, preventing access to files outside the project via relative paths like `../../`.

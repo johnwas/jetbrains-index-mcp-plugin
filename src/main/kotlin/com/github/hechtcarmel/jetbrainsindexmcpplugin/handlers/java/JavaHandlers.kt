@@ -1,5 +1,7 @@
 package com.github.hechtcarmel.jetbrainsindexmcpplugin.handlers.java
 
+import com.github.hechtcarmel.jetbrainsindexmcpplugin.constants.ErrorMessages
+import com.github.hechtcarmel.jetbrainsindexmcpplugin.constants.toArgumentFailure
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.handlers.*
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.models.StructureKind
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.models.StructureNode
@@ -41,6 +43,7 @@ object JavaHandlers {
         registry.registerImplementationsHandler(JavaImplementationsHandler())
         registry.registerCallHierarchyHandler(JavaCallHierarchyHandler())
         registry.registerSymbolSearchHandler(JavaSymbolSearchHandler())
+        registry.registerSymbolReferenceHandler(JavaSymbolReferenceHandler())
         registry.registerSuperMethodsHandler(JavaSuperMethodsHandler())
         registry.registerStructureHandler(JavaStructureHandler())
 
@@ -1498,5 +1501,248 @@ class KotlinStructureHandler : BaseJavaHandler<List<StructureNode>>(), Structure
         } catch (_: Exception) {
             ""
         }
+    }
+}
+
+/**
+ * Java implementation of [SymbolReferenceHandler].
+ *
+ * Resolves fully qualified symbol references (e.g., `com.example.MyClass#method(String)`)
+ * to PSI elements using Java PSI APIs.
+ */
+class JavaSymbolReferenceHandler : BaseJavaHandler<PsiNamedElement>(), SymbolReferenceHandler {
+
+    companion object {
+        // A valid Java identifier: starts with a letter, underscore, or dollar sign
+        private const val IDENTIFIER = """[a-zA-Z_$][a-zA-Z0-9_$]*"""
+
+        // Dotted qualified name: at least two segments (package + class) separated by dots
+        private const val QUALIFIED_NAME = """$IDENTIFIER(\.$IDENTIFIER)+"""
+
+        // example: int, boolean
+        private const val PRIMITIVE_TYPE = """(byte|short|int|long|float|double|boolean|char)"""
+
+        // example: String, int[], Object..., package.ClassName, package.ClassName[]
+        private const val PARAMETER_TYPE = """\s*($PRIMITIVE_TYPE|$QUALIFIED_NAME|$IDENTIFIER)(\[\])*(\.\.\.)?\s*"""
+
+        // example: (int, String[]), (List, java.util.Map)
+        private const val PARAMETER_LIST = """\(($PARAMETER_TYPE(,$PARAMETER_TYPE)*)?\)"""
+
+        // example: com.example.MyClass, com.example.MyClass#fieldName, com.example.MyClass#methodName(int, String)
+        internal val JAVA_SYMBOL_PATTERN = """^$QUALIFIED_NAME(#$IDENTIFIER($PARAMETER_LIST)?)?$""".toRegex()
+
+        private val SYMBOL_EXAMPLES = listOf(
+            "'com.example.ClassName'",
+            "'com.example.ClassName#memberName'",
+            "'com.example.ClassName#methodName(int[], String, java.util.List)'"
+        )
+    }
+
+    override val languageId = "JAVA"
+    override val languageName = "Java"
+
+    override fun canHandle(element: PsiElement): Boolean {
+        return isAvailable() && isJavaOrKotlinLanguage(element)
+    }
+
+    override fun isAvailable(): Boolean = PluginDetectors.java.isAvailable
+
+    override fun resolveSymbol(project: Project, symbol: String): Result<PsiNamedElement> {
+        val erasedSymbol = stripGenerics(symbol.trim())
+
+        if (!JAVA_SYMBOL_PATTERN.matches(erasedSymbol)) {
+            return ErrorMessages.invalidSymbolFormat(symbol, SYMBOL_EXAMPLES).toArgumentFailure()
+        }
+
+        val memberSeparatorIndex = erasedSymbol.indexOf('#')
+        val classFqn: String
+        val memberPart: String?
+
+        if (memberSeparatorIndex >= 0) {
+            classFqn = erasedSymbol.substring(0, memberSeparatorIndex)
+            memberPart = erasedSymbol.substring(memberSeparatorIndex + 1)
+        } else {
+            classFqn = erasedSymbol
+            memberPart = null
+        }
+
+        val psiClass = findClass(project, classFqn)
+            ?: return ErrorMessages.typeNotFound(classFqn, project.name).toArgumentFailure()
+
+        if (memberPart == null) {
+            return Result.success(psiClass)
+        }
+
+        val parenOpenIndex = memberPart.indexOf('(')
+        val parenCloseIndex = memberPart.lastIndexOf(')')
+        if (parenOpenIndex >= 0 && parenCloseIndex > parenOpenIndex) {
+            return resolveMethodWithParams(psiClass, classFqn, memberPart, parenOpenIndex, parenCloseIndex)
+        }
+
+        return resolveMemberByName(psiClass, classFqn, memberPart)
+    }
+
+    private fun findClass(project: Project, classFqn: String): PsiClass? {
+        val facade = JavaPsiFacade.getInstance(project)
+        return facade.findClass(classFqn, GlobalSearchScope.projectScope(project))
+            ?: facade.findClass(classFqn, GlobalSearchScope.allScope(project))
+    }
+
+    private fun resolveMethodWithParams(
+        psiClass: PsiClass,
+        classFqn: String,
+        memberPart: String,
+        parenOpenIndex: Int,
+        parenCloseIndex: Int
+    ): Result<PsiNamedElement> {
+        val methodName = memberPart.substring(0, parenOpenIndex)
+        val paramsString = memberPart.substring(parenOpenIndex + 1, parenCloseIndex)
+        val requestedParams = if (paramsString.isBlank()) emptyList()
+        else paramsString.split(',').map { it.trim() }
+
+        val allMethods = findMostDerivedMethods(psiClass, methodName)
+
+        if (allMethods.isEmpty()) {
+            return ErrorMessages.memberNotFoundInType(methodName, classFqn).toArgumentFailure()
+        }
+
+        val matchingMethods = allMethods.filter { method ->
+            matchesParameterTypes(method, requestedParams)
+        }
+
+        return when {
+            matchingMethods.isEmpty() -> {
+                val signatures = buildDisambiguatingSignatures(methodName, allMethods)
+                ErrorMessages.noMethodsMatch(memberPart, classFqn, signatures).toArgumentFailure()
+            }
+            matchingMethods.size == 1 -> Result.success(matchingMethods[0])
+            else -> {
+                val signatures = buildDisambiguatingSignatures(methodName, allMethods, matchingMethods)
+                ErrorMessages.multipleMethodsMatch(memberPart, classFqn, signatures).toArgumentFailure()
+            }
+        }
+    }
+
+    private fun resolveMemberByName(
+        psiClass: PsiClass,
+        classFqn: String,
+        memberName: String
+    ): Result<PsiNamedElement> {
+        // Try field/enum constant first (true = search supertypes)
+        val field = psiClass.findFieldByName(memberName, true)
+        if (field != null && isInheritedBy(field, psiClass)) {
+            return Result.success(field)
+        }
+
+        // Try methods (searches supertypes, collapses overrides to most derived; includes constructors)
+        val methods = findMostDerivedMethods(psiClass, memberName)
+
+        return when {
+            methods.isEmpty() -> ErrorMessages.memberNotFoundInType(memberName, classFqn).toArgumentFailure()
+            methods.size == 1 -> Result.success(methods[0])
+            else -> {
+                val signatures = buildDisambiguatingSignatures(memberName, methods)
+                ErrorMessages.multipleMethodsMatch(memberName, classFqn, signatures).toArgumentFailure()
+            }
+        }
+    }
+
+    private fun findMostDerivedMethods(psiClass: PsiClass, name: String): List<PsiMethod> {
+        if (name == psiClass.name) {
+            // If member name matches class name, it's a constructor. Return all constructors.
+            return psiClass.constructors.toList()
+        }
+
+        val allMethods = if (psiClass.language.id == "JAVA") {
+            psiClass.findMethodsByName(name, true).toList()
+        } else {
+            // Languages like Kotlin may mangle method names (e.g., for properties).
+            // So we check both the method name and the navigation element's name.
+            psiClass.allMethods.filter {
+                it.name == name || (it.navigationElement as? PsiNamedElement)?.name == name
+            }
+        }
+
+        val visibleMethods= allMethods.filter { isInheritedBy(it, psiClass) }
+
+        if (visibleMethods.size <= 1) return visibleMethods
+
+        val superMethods = mutableSetOf<PsiMethod>()
+        for (method in visibleMethods) {
+            if (method in superMethods) continue
+            superMethods.addAll(method.findSuperMethods())
+        }
+        return visibleMethods.filter { it !in superMethods }
+    }
+
+    /**
+     * Returns true when [member] is visible to [queryClass] through inheritance.
+     *
+     * Java visibility rules for inherited members:
+     * - **private**: visible only within the declaring class
+     * - **package-private** (default): visible only if [queryClass] is in the same package
+     * - **protected / public**: always inherited
+     */
+    private fun isInheritedBy(member: PsiMember, queryClass: PsiClass): Boolean {
+        val declaringClass = member.containingClass ?: return false
+        if (declaringClass == queryClass) return true
+        if (member.hasModifierProperty(PsiModifier.PRIVATE)) return false
+        if (member.hasModifierProperty(PsiModifier.PUBLIC) || member.hasModifierProperty(PsiModifier.PROTECTED)) return true
+        // Package-private: visible only if both classes are in the same package
+        val memberPackage = (declaringClass.containingFile as? PsiJavaFile)?.packageName
+        val queryPackage = (queryClass.containingFile as? PsiJavaFile)?.packageName
+        return memberPackage != null && memberPackage == queryPackage
+    }
+
+    private fun matchesParameterTypes(method: PsiMethod, requestedTypes: List<String>): Boolean {
+        if (requestedTypes.size != method.parameterList.parameters.size) return false
+        if (requestedTypes.isEmpty()) return true
+
+        return requestedTypes.zip(method.parameterList.parameters).all { (requested, parameter) ->
+            val presentable = stripGenerics(parameter.type.presentableText)
+            val canonical = stripGenerics(parameter.type.canonicalText)
+            requested == presentable || requested == canonical
+        }
+    }
+
+    private fun buildDisambiguatingSignatures(
+        methodName: String,
+        allMethods: List<PsiMethod>,
+        matchingMethods: List<PsiMethod> = allMethods
+    ): List<String> {
+        val ambiguousTypes = allMethods
+            .asSequence()
+            .flatMap { it.parameterList.parameters.asSequence() }
+            .groupBy(
+                { stripGenerics(it.type.presentableText) },
+                { stripGenerics(it.type.canonicalText) })
+            .filter { it.value.distinct().size > 1 }
+            .keys
+
+        return matchingMethods.map { method ->
+            val parameterTypes = method.parameterList.parameters.joinToString(", ") { parameter ->
+                val presentable = stripGenerics(parameter.type.presentableText)
+                if (presentable in ambiguousTypes) stripGenerics(parameter.type.canonicalText) else presentable
+            }
+            "$methodName($parameterTypes)"
+        }
+    }
+
+    internal fun stripGenerics(input: String): String {
+        if ('<' !in input) return input
+        val sb = StringBuilder(input.length)
+        var depth = 0
+        for (ch in input) {
+            when {
+                ch == '<' -> depth++
+                ch == '>' -> depth--
+                // Only append characters that are outside of generic angle brackets
+                depth == 0 -> sb.append(ch)
+                // Unbalanced generics, just return original string
+                depth < 0 -> return input
+            }
+        }
+        if (depth != 0) return input
+        return sb.toString()
     }
 }

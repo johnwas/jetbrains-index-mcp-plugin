@@ -18,6 +18,7 @@ import com.intellij.psi.PsiNamedElement
 import com.intellij.psi.PsiWhiteSpace
 import com.intellij.psi.search.searches.ReferencesSearch
 import com.intellij.psi.util.PsiTreeUtil
+import com.intellij.refactoring.rename.RenamePsiElementProcessor
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -474,10 +475,17 @@ class SafeDeleteTool : AbstractRefactoringTool() {
 
     /**
      * Prepares all data needed for file delete in a read action.
-     * Collects top-level declarations and finds only EXTERNAL usages (internal call chains don't block).
+     * Finds external usages through three layers:
      *
-     * Only checks top-level declarations (classes, top-level functions) for external usages,
-     * not every named element. Internal methods within a class are covered by checking the class itself.
+     * 1. **Direct file references** — `ReferencesSearch.search(psiFile)` catches any PSI
+     *    references that resolve directly to the file.
+     * 2. **Resource element references** — For Android resource files, the file maps to a
+     *    resource element (e.g., `ResourceReferencePsiElement`). We probe
+     *    `RenamePsiElementProcessor.prepareRenaming()` to detect this substitution, then
+     *    search for usages of the resource element. This catches `@xml/`, `@drawable/`, etc.
+     *    references in XML files.
+     * 3. **Top-level symbol references** — Checks top-level declarations (classes, functions)
+     *    for external usages. Internal call chains don't block deletion.
      */
     private fun prepareFileDelete(
         project: Project,
@@ -494,10 +502,25 @@ class SafeDeleteTool : AbstractRefactoringTool() {
         val fileName = psiFile.name
         val filePath = psiFile.virtualFile?.let { getRelativePath(project, it) } ?: file
 
-        // Collect only TOP-LEVEL declarations (not all named elements)
-        // This improves performance and is semantically correct:
-        // - If a top-level class has external usages, we block deletion
-        // - Internal methods are implicitly covered by the class check
+        val externalUsages = mutableListOf<UsageInfo>()
+
+        // Layer 1: Search for direct references to the PsiFile itself.
+        // PsiFile implements PsiNamedElement, so findUsages works directly.
+        ProgressManager.checkCanceled()
+        for (usage in findUsages(project, psiFile)) {
+            if (usage.file != filePath) {
+                externalUsages.add(usage)
+            }
+        }
+
+        // Layer 2: Check if the file maps to a resource element (e.g., Android resource).
+        // Uses the same prepareRenaming probe as RenameSymbolTool.computeEffectiveNewName.
+        if (externalUsages.isEmpty()) {
+            ProgressManager.checkCanceled()
+            externalUsages.addAll(findResourceElementUsages(project, psiFile, filePath))
+        }
+
+        // Layer 3: Search top-level declarations for external usages.
         val topLevelElements = collectTopLevelDeclarations(project, psiFile)
 
         val symbols = topLevelElements.map { (element, line, column) ->
@@ -509,18 +532,14 @@ class SafeDeleteTool : AbstractRefactoringTool() {
             )
         }
 
-        val namedElements = topLevelElements.map { it.first }
-
-        // Find EXTERNAL usages only (filter out usages within this file)
-        // Check for cancellation between symbol searches for large files
-        val externalUsages = mutableListOf<UsageInfo>()
-        for (element in namedElements) {
-            ProgressManager.checkCanceled() // Allow cancellation between symbol searches
-            val usages = findUsages(project, element)
-            for (usage in usages) {
-                // Only include usages from OTHER files
-                if (usage.file != filePath) {
-                    externalUsages.add(usage)
+        if (externalUsages.isEmpty()) {
+            val namedElements = topLevelElements.map { it.first }
+            for (element in namedElements) {
+                ProgressManager.checkCanceled()
+                for (usage in findUsages(project, element)) {
+                    if (usage.file != filePath) {
+                        externalUsages.add(usage)
+                    }
                 }
             }
         }
@@ -534,6 +553,41 @@ class SafeDeleteTool : AbstractRefactoringTool() {
                 externalUsages = externalUsages
             )
         )
+    }
+
+    /**
+     * Checks if the file maps to a resource element (e.g., Android resource) and searches
+     * for usages of that element.
+     *
+     * Uses [RenamePsiElementProcessor.prepareRenaming] to probe for element substitution.
+     * When Android's `ResourceReferenceRenameProcessor` is present, it replaces the `PsiFile`
+     * with a `ResourceReferencePsiElement` in the allRenames map. We then search for usages
+     * of that resource element, which catches `@xml/`, `@drawable/`, etc. references in XML.
+     *
+     * Returns only external usages (from files other than the given file).
+     */
+    private fun findResourceElementUsages(
+        project: Project,
+        psiFile: PsiFile,
+        filePath: String
+    ): List<UsageInfo> {
+        val processor = RenamePsiElementProcessor.forElement(psiFile)
+        val probeRenames = linkedMapOf<PsiElement, String>(psiFile to psiFile.name)
+        try {
+            processor.prepareRenaming(psiFile, psiFile.name, probeRenames)
+        } catch (_: Exception) {
+            return emptyList()
+        }
+
+        // If the PsiFile was substituted, search for usages of the substitute element
+        if (psiFile !in probeRenames && probeRenames.isNotEmpty()) {
+            val resourceElement = probeRenames.keys.firstOrNull()
+            if (resourceElement is PsiNamedElement) {
+                return findUsages(project, resourceElement).filter { it.file != filePath }
+            }
+        }
+
+        return emptyList()
     }
 
     /**
