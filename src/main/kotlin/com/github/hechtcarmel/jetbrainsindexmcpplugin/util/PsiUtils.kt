@@ -2,6 +2,7 @@ package com.github.hechtcarmel.jetbrainsindexmcpplugin.util
 
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.roots.OrderEnumerator
+import com.intellij.openapi.util.SystemInfo
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VfsUtil
 import com.intellij.openapi.vfs.VirtualFile
@@ -115,30 +116,34 @@ object PsiUtils {
     }
 
     fun resolveVirtualFileAnywhere(project: Project, path: String): VirtualFile? {
+        // On Windows, \ is a path separator (and is forbidden in filenames), so normalizing is
+        // always safe and necessary. On POSIX, \ is a valid filename character and must not be
+        // treated as a separator.
+        val normalizedPath = if (SystemInfo.isWindows) path.replace('\\', '/') else path
         val virtualFileManager = VirtualFileManager.getInstance()
-        
+
         // Handle already-formatted jar:// URLs
-        if (path.startsWith("jar://")) {
-            val jarPath = path.removePrefix("jar://").substringBefore("!/")
+        if (normalizedPath.startsWith("jar://")) {
+            val jarPath = normalizedPath.removePrefix("jar://").substringBefore("!/")
             val projectLibraryJars = project.getProjectLibraryJars()
-            if (projectLibraryJars.none { jarPath.startsWith(it) }) return null
-            return virtualFileManager.findFileByUrl(path)
+            if (projectLibraryJars.none { isPathPrefixOf(it, jarPath) }) return null
+            return virtualFileManager.findFileByUrl(normalizedPath)
         }
 
         // Handle jar path format: /path/to/file.jar!/internal/path
-        if (path.contains(".jar!/")) {
-            val parts = path.split("!/", limit = 2)
+        if (normalizedPath.contains(".jar!/")) {
+            val parts = normalizedPath.split("!/", limit = 2)
             if (parts.size == 2) {
                 val jarPath = parts[0]
                 val internalPath = parts[1]
-                
+
                 val homeExpandedJarPath = expandHome(jarPath)
                 val absoluteJarPath = resolveAbsolutePathString(homeExpandedJarPath, listOfNotNull(project.basePath).asSequence())
                     ?: homeExpandedJarPath
 
                 val projectLibraryJars = project.getProjectLibraryJars()
 
-                if (projectLibraryJars.none { absoluteJarPath.startsWith(it) }) {
+                if (projectLibraryJars.none { isPathPrefixOf(it, absoluteJarPath) }) {
                     return null
                 }
                 
@@ -149,7 +154,7 @@ object PsiUtils {
             }
         }
 
-        return getVirtualFile(project, path)
+        return getVirtualFile(project, normalizedPath)
     }
 
     fun resolveLocalFile(path: String, rootCandidates: Sequence<String>): VirtualFile? {
@@ -279,11 +284,29 @@ object PsiUtils {
     }
 }
 
+/**
+ * Checks whether [prefix] is a path prefix of [child], using NIO Path semantics.
+ * On Windows, NIO Path comparison is case-insensitive, matching the OS file system behavior.
+ */
+private fun isPathPrefixOf(prefix: String, child: String): Boolean {
+    return try {
+        Path.of(child).startsWith(Path.of(prefix))
+    } catch (_: InvalidPathException) {
+        child.startsWith(prefix)
+    }
+}
+
 private fun Project.getProjectLibraryJars(): List<String> = OrderEnumerator.orderEntries(this)
     .librariesOnly()
     .classes()
     .roots
     .mapNotNull { root ->
-        root.toNioPathOrNull()?.toString()
-            ?: root.path.takeIf { it.contains("!/") }?.substringBefore("!/")
+        root.toNioPathOrNull()?.toString()?.replace('\\', '/')
+            ?: root.path.takeIf { it.contains("!/") }
+                ?.substringBefore("!/")
+                ?.replace('\\', '/')
+                ?.let { p ->
+                    // On Windows, JarFileSystem paths start with /C:/ — normalize to C:/
+                    if (p.length >= 3 && p[0] == '/' && p[2] == ':') p.substring(1) else p
+                }
     }
