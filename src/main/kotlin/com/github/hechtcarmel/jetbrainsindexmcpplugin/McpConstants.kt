@@ -30,7 +30,6 @@ object McpConstants {
     const val SSE_ENDPOINT_PATH = "$MCP_ENDPOINT_PATH/sse"
     const val STREAMABLE_HTTP_ENDPOINT_PATH = "$MCP_ENDPOINT_PATH/streamable-http"
     const val SESSION_ID_PARAM = "sessionId"
-    const val MCP_SESSION_ID_HEADER = "Mcp-Session-Id"
 
     // JSON-RPC version
     const val JSON_RPC_VERSION = "2.0"

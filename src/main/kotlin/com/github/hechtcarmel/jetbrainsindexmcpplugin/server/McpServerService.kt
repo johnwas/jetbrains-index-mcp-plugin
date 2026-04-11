@@ -5,7 +5,6 @@ import com.github.hechtcarmel.jetbrainsindexmcpplugin.McpConstants
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.ServerStatusListener
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.server.transport.KtorMcpServer
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.server.transport.KtorSseSessionManager
-import com.github.hechtcarmel.jetbrainsindexmcpplugin.server.transport.StreamableHttpSessionManager
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.settings.McpSettings
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.settings.McpSettingsConfigurable
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.ToolRegistry
@@ -44,7 +43,6 @@ class McpServerService(
     private val toolRegistry: ToolRegistry = ToolRegistry()
     private val jsonRpcHandler: JsonRpcHandler
     private val sseSessionManager: KtorSseSessionManager = KtorSseSessionManager()
-    private val streamableHttpSessionManager: StreamableHttpSessionManager = StreamableHttpSessionManager()
     private var ktorServer: KtorMcpServer? = null
     private var serverError: ServerError? = null
 
@@ -110,7 +108,6 @@ class McpServerService(
             host = host,
             jsonRpcHandler = jsonRpcHandler,
             sseSessionManager = sseSessionManager,
-            streamableHttpSessionManager = streamableHttpSessionManager,
             coroutineScope = coroutineScope
         )
 
@@ -273,7 +270,6 @@ class McpServerService(
         LOG.info("Disposing MCP Server Service")
         stopServer()
         sseSessionManager.closeAllSessions()
-        streamableHttpSessionManager.closeAllSessions()
     }
 }
 

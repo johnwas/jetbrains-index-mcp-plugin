@@ -406,13 +406,15 @@ The plugin runs a **custom embedded Ktor CIO HTTP server** with **dual MCP trans
 ### Streamable HTTP Transport (Primary, MCP 2025-03-26)
 
 ```
-AI Assistant ──────► POST /index-mcp/streamable-http (initialize)
-                     ◄── HTTP 200 + Mcp-Session-Id
-             ──────► POST /index-mcp/streamable-http (requests/notifications)
+AI Assistant ──────► POST /index-mcp/streamable-http (initialize or request)
                      ◄── JSON-RPC response or HTTP 202 Accepted
-             ──────► DELETE /index-mcp/streamable-http
-                     ◄── HTTP 200                    (session terminated)
+             ──────► POST /index-mcp/streamable-http (follow-up requests/notifications)
+                     ◄── JSON-RPC response or HTTP 202 Accepted
 ```
+
+The plugin uses stateless Streamable HTTP for the primary MCP transport. It does not
+issue `Mcp-Session-Id` headers, does not require session resumption, and does not
+implement or advertise authentication capabilities.
 
 ### Legacy SSE Transport (MCP Inspector, older clients)
 

@@ -25,11 +25,11 @@ class KtorMcpServerUnitTest : TestCase() {
 
     private val httpClient = HttpClient.newHttpClient()
     private val json = Json { ignoreUnknownKeys = true }
+    private val mcpSessionIdHeader = "Mcp-Session-Id"
 
     private lateinit var toolRegistry: ToolRegistry
     private lateinit var coroutineScope: CoroutineScope
     private lateinit var sseSessionManager: KtorSseSessionManager
-    private lateinit var streamableHttpSessionManager: StreamableHttpSessionManager
     private lateinit var server: KtorMcpServer
     private var port: Int = 0
 
@@ -38,9 +38,8 @@ class KtorMcpServerUnitTest : TestCase() {
         toolRegistry = ToolRegistry().also { it.registerBuiltInTools() }
         coroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         sseSessionManager = KtorSseSessionManager()
-        streamableHttpSessionManager = StreamableHttpSessionManager()
         port = findFreePort()
-        server = createServer(port, streamableHttpSessionManager)
+        server = createServer(port)
         assertEquals(KtorMcpServer.StartResult.Success, server.start())
     }
 
@@ -50,7 +49,7 @@ class KtorMcpServerUnitTest : TestCase() {
         super.tearDown()
     }
 
-    fun testStreamableInitializeReturnsSessionHeaderAnd2025ProtocolVersion() {
+    fun testStreamableInitializeOmitsSessionHeaderAndReturns2025ProtocolVersion() {
         val response = sendRequest(
             method = "POST",
             path = McpConstants.STREAMABLE_HTTP_ENDPOINT_PATH,
@@ -58,9 +57,9 @@ class KtorMcpServerUnitTest : TestCase() {
         )
 
         assertEquals(HttpStatusCode.OK.value, response.statusCode())
-        assertTrue(
-            "Expected Mcp-Session-Id response header",
-            response.headers().firstValue(McpConstants.MCP_SESSION_ID_HEADER).isPresent
+        assertFalse(
+            "Streamable HTTP should not return an Mcp-Session-Id header in stateless mode",
+            response.headers().firstValue(mcpSessionIdHeader).isPresent
         )
 
         val responseBody = json.parseToJsonElement(response.body()).jsonObject
@@ -87,8 +86,6 @@ class KtorMcpServerUnitTest : TestCase() {
     }
 
     fun testStreamableBatchRequestsReturnJsonArray() {
-        val sessionId = initializeStreamableSession()
-
         val response = sendRequest(
             method = "POST",
             path = McpConstants.STREAMABLE_HTTP_ENDPOINT_PATH,
@@ -97,8 +94,7 @@ class KtorMcpServerUnitTest : TestCase() {
                   {"jsonrpc":"2.0","id":1,"method":"ping"},
                   {"jsonrpc":"2.0","id":2,"method":"ping"}
                 ]
-            """.trimIndent(),
-            headers = mapOf(McpConstants.MCP_SESSION_ID_HEADER to sessionId)
+            """.trimIndent()
         )
 
         assertEquals(HttpStatusCode.OK.value, response.statusCode())
@@ -123,13 +119,10 @@ class KtorMcpServerUnitTest : TestCase() {
     }
 
     fun testStreamableInvalidNotificationReturnsInvalidRequestError() {
-        val sessionId = initializeStreamableSession()
-
         val response = sendRequest(
             method = "POST",
             path = McpConstants.STREAMABLE_HTTP_ENDPOINT_PATH,
-            body = """{"jsonrpc":"2.0"}""",
-            headers = mapOf(McpConstants.MCP_SESSION_ID_HEADER to sessionId)
+            body = """{"jsonrpc":"2.0"}"""
         )
 
         assertEquals(HttpStatusCode.BadRequest.value, response.statusCode())
@@ -139,8 +132,6 @@ class KtorMcpServerUnitTest : TestCase() {
     }
 
     fun testStreamableMixedBatchReturnsInvalidRequestError() {
-        val sessionId = initializeStreamableSession()
-
         val response = sendRequest(
             method = "POST",
             path = McpConstants.STREAMABLE_HTTP_ENDPOINT_PATH,
@@ -149,8 +140,7 @@ class KtorMcpServerUnitTest : TestCase() {
                   {"jsonrpc":"2.0","id":1,"method":"ping"},
                   {"jsonrpc":"2.0","id":1,"result":{}}
                 ]
-            """.trimIndent(),
-            headers = mapOf(McpConstants.MCP_SESSION_ID_HEADER to sessionId)
+            """.trimIndent()
         )
 
         assertEquals(HttpStatusCode.BadRequest.value, response.statusCode())
@@ -160,8 +150,6 @@ class KtorMcpServerUnitTest : TestCase() {
     }
 
     fun testStreamableNotificationBatchReturnsAcceptedWithoutResponseBody() {
-        val sessionId = initializeStreamableSession()
-
         val response = sendRequest(
             method = "POST",
             path = McpConstants.STREAMABLE_HTTP_ENDPOINT_PATH,
@@ -170,25 +158,35 @@ class KtorMcpServerUnitTest : TestCase() {
                   {"jsonrpc":"2.0","method":"ping"},
                   {"jsonrpc":"2.0","method":"notifications/initialized"}
                 ]
-            """.trimIndent(),
-            headers = mapOf(McpConstants.MCP_SESSION_ID_HEADER to sessionId)
+            """.trimIndent()
         )
 
         assertEquals(HttpStatusCode.Accepted.value, response.statusCode())
         assertTrue("Expected empty body for notification batch", response.body().isEmpty())
     }
 
-    fun testDeleteWithoutSessionHeaderReturnsJsonRpcError() {
+    fun testStreamableDeleteReturnsMethodNotAllowedInStatelessMode() {
         val response = sendRequest(
             method = "DELETE",
             path = McpConstants.STREAMABLE_HTTP_ENDPOINT_PATH
         )
 
-        assertEquals(HttpStatusCode.BadRequest.value, response.statusCode())
-        assertEquals("application/json", response.headers().firstValue("content-type").orElse("").substringBefore(";"))
+        assertEquals(HttpStatusCode.MethodNotAllowed.value, response.statusCode())
+        assertEquals("POST", response.headers().firstValue("allow").orElse(""))
+    }
+
+    fun testStreamableRequestSucceedsWithoutInitialize() {
+        val response = sendRequest(
+            method = "POST",
+            path = McpConstants.STREAMABLE_HTTP_ENDPOINT_PATH,
+            body = """{"jsonrpc":"2.0","id":1,"method":"ping"}"""
+        )
+
+        assertEquals(HttpStatusCode.OK.value, response.statusCode())
 
         val responseBody = json.parseToJsonElement(response.body()).jsonObject
-        assertEquals("-32600", responseBody["error"]!!.jsonObject["code"]!!.jsonPrimitive.content)
+        assertEquals("1", responseBody["id"]!!.jsonPrimitive.content)
+        assertNotNull(responseBody["result"])
     }
 
     fun testRejectsNonLocalOrigin() {
@@ -245,45 +243,27 @@ class KtorMcpServerUnitTest : TestCase() {
         }
     }
 
-    fun testStopClearsStreamableSessionsBeforeRestart() {
-        val sessionId = initializeStreamableSession()
-
+    fun testStreamableRequestStillWorksAfterRestart() {
         server.stop()
 
         port = findFreePort()
-        server = createServer(port, streamableHttpSessionManager)
+        server = createServer(port)
         assertEquals(KtorMcpServer.StartResult.Success, server.start())
 
         val response = sendRequest(
             method = "POST",
             path = McpConstants.STREAMABLE_HTTP_ENDPOINT_PATH,
-            body = """{"jsonrpc":"2.0","id":1,"method":"ping"}""",
-            headers = mapOf(McpConstants.MCP_SESSION_ID_HEADER to sessionId)
-        )
-
-        assertEquals(HttpStatusCode.NotFound.value, response.statusCode())
-    }
-
-    private fun initializeStreamableSession(): String {
-        val response = sendRequest(
-            method = "POST",
-            path = McpConstants.STREAMABLE_HTTP_ENDPOINT_PATH,
-            body = initializeRequestBody("2025-03-26")
+            body = """{"jsonrpc":"2.0","id":1,"method":"ping"}"""
         )
 
         assertEquals(HttpStatusCode.OK.value, response.statusCode())
-        return response.headers().firstValue(McpConstants.MCP_SESSION_ID_HEADER).orElseThrow()
     }
 
-    private fun createServer(
-        port: Int,
-        streamableSessionManager: StreamableHttpSessionManager
-    ): KtorMcpServer {
+    private fun createServer(port: Int): KtorMcpServer {
         return KtorMcpServer(
             port = port,
             jsonRpcHandler = JsonRpcHandler(toolRegistry),
             sseSessionManager = sseSessionManager,
-            streamableHttpSessionManager = streamableSessionManager,
             coroutineScope = coroutineScope
         )
     }

@@ -2,7 +2,21 @@
 
 # IDE Index MCP Server Changelog
 
-## [Unreleased]
+## [4.10.3] - 2026-04-11
+### Changed
+- **Streamable HTTP is now stateless** — The primary `/index-mcp/streamable-http` transport no longer creates or validates `Mcp-Session-Id` headers. Requests continue working across client reconnects and server restarts without transport reauthentication semantics.
+
+### Fixed
+- **Claude Code stale session failure mode** — Removed the transport-level stale session `404` path that Claude Code could surface as a misleading authentication problem, while preserving legacy SSE behavior.
+
+## [4.10.2] - 2026-04-11
+### Changed
+- **Streamable HTTP is now stateless** — The primary `/index-mcp/streamable-http` transport no longer creates or validates `Mcp-Session-Id` headers. Requests continue working across client reconnects and server restarts without transport reauthentication semantics.
+
+### Fixed
+- **Claude Code stale session failure mode** — Removed the transport-level stale session `404` path that Claude Code could surface as a misleading authentication problem, while preserving legacy SSE behavior.
+- **`ide_find_references` search failure handling** — Added defensive handling for `LinkageError` / `NoSuchMethodError` failures coming from IDE search infrastructure so affected calls return a structured error with fallback guidance instead of hanging indefinitely.
+- **Plugin verification baseline** — Added explicit Plugin Verifier coverage for IntelliJ IDEA Ultimate `2026.1` build `IU-261.22158.277` to keep this release line checked against the exact IDE version reported in [#122](https://github.com/hechtcarmel/jetbrains-index-mcp-plugin/issues/122).
 
 ## [4.10.1] - 2026-04-07
 ### Fixed
