@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+## [4.10.4] - 2026-04-12
+### Fixed
+- Improved command history stability during concurrent MCP tool calls.
+
 ## [4.10.3] - 2026-04-11
 ### Changed
 - **Streamable HTTP is now stateless** — The primary `/index-mcp/streamable-http` transport no longer creates or validates `Mcp-Session-Id` headers. Requests continue working across client reconnects and server restarts without transport reauthentication semantics.

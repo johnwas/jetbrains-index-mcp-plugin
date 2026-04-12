@@ -10,11 +10,18 @@ import com.github.hechtcarmel.jetbrainsindexmcpplugin.history.CommandStatus
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.server.models.*
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.ToolRegistry
 import com.intellij.openapi.diagnostic.logger
+import com.intellij.openapi.project.Project
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.*
 
-class JsonRpcHandler(
-    private val toolRegistry: ToolRegistry
+class JsonRpcHandler @JvmOverloads constructor(
+    private val toolRegistry: ToolRegistry,
+    private val recordHistory: (Project, CommandEntry) -> Unit = { project, entry ->
+        CommandHistoryService.getInstance(project).recordCommand(entry)
+    },
+    private val updateHistory: (Project, String, CommandStatus, String?, Long?) -> Unit = { project, id, status, result, duration ->
+        CommandHistoryService.getInstance(project).updateCommandStatus(id, status, result, duration)
+    }
 ) {
     private val projectResolver = ProjectResolver
     private val json = Json {
@@ -130,12 +137,7 @@ class JsonRpcHandler(
             parameters = arguments
         )
 
-        val historyService = try {
-            CommandHistoryService.getInstance(project)
-        } catch (ignore: Exception) {
-            null
-        }
-        historyService?.recordCommand(commandEntry)
+        recordHistorySafely(project, commandEntry)
 
         val startTime = System.currentTimeMillis()
 
@@ -144,16 +146,17 @@ class JsonRpcHandler(
             val duration = System.currentTimeMillis() - startTime
 
             // Update history
-            historyService?.updateCommandStatus(
-                commandEntry.id,
-                if (result.isError) CommandStatus.ERROR else CommandStatus.SUCCESS,
-                result.content.firstOrNull()?.let {
+            updateHistorySafely(
+                project = project,
+                commandEntry = commandEntry,
+                status = if (result.isError) CommandStatus.ERROR else CommandStatus.SUCCESS,
+                result = result.content.firstOrNull()?.let {
                     when (it) {
                         is ContentBlock.Text -> it.text
                         is ContentBlock.Image -> "[Image]"
                     }
                 },
-                duration
+                duration = duration
             )
 
             JsonRpcResponse(
@@ -164,11 +167,12 @@ class JsonRpcHandler(
             val duration = System.currentTimeMillis() - startTime
             LOG.error("Tool execution failed: $toolName", e)
 
-            historyService?.updateCommandStatus(
-                commandEntry.id,
-                CommandStatus.ERROR,
-                e.message,
-                duration
+            updateHistorySafely(
+                project = project,
+                commandEntry = commandEntry,
+                status = CommandStatus.ERROR,
+                result = e.message,
+                duration = duration
             )
 
             JsonRpcResponse(
@@ -180,6 +184,28 @@ class JsonRpcHandler(
                     )
                 )
             )
+        }
+    }
+
+    private fun recordHistorySafely(project: Project, commandEntry: CommandEntry) {
+        try {
+            recordHistory(project, commandEntry)
+        } catch (e: Exception) {
+            LOG.warn("Failed to record command history for ${commandEntry.toolName}", e)
+        }
+    }
+
+    private fun updateHistorySafely(
+        project: Project,
+        commandEntry: CommandEntry,
+        status: CommandStatus,
+        result: String?,
+        duration: Long
+    ) {
+        try {
+            updateHistory(project, commandEntry.id, status, result, duration)
+        } catch (e: Exception) {
+            LOG.warn("Failed to update command history for ${commandEntry.toolName}", e)
         }
     }
 
