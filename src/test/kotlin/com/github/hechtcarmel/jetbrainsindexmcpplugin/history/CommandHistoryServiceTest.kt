@@ -1,22 +1,34 @@
 package com.github.hechtcarmel.jetbrainsindexmcpplugin.history
 
+import com.github.hechtcarmel.jetbrainsindexmcpplugin.settings.McpSettings
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 
 class CommandHistoryServiceTest : BasePlatformTestCase() {
 
     private lateinit var historyService: CommandHistoryService
+    private var originalMaxHistorySize: Int = 100
 
     override fun setUp() {
         super.setUp()
+        originalMaxHistorySize = McpSettings.getInstance().maxHistorySize
         historyService = CommandHistoryService.getInstance(project)
         historyService.clearHistory()
+        McpSettings.getInstance().maxHistorySize = 100
     }
 
     override fun tearDown() {
-        historyService.clearHistory()
-        super.tearDown()
+        try {
+            historyService.clearHistory()
+            McpSettings.getInstance().maxHistorySize = originalMaxHistorySize
+        } finally {
+            super.tearDown()
+        }
     }
 
     fun testRecordCommand() {
@@ -108,6 +120,87 @@ class CommandHistoryServiceTest : BasePlatformTestCase() {
 
         val history = historyService.entries
         assertTrue("History should not exceed max size", history.size <= maxSize)
+    }
+
+    fun testConcurrentRecordCommandDoesNotCrashOrExceedLimit() {
+        McpSettings.getInstance().maxHistorySize = 100
+
+        val threadCount = 8
+        val iterationsPerThread = 5000
+        val startLatch = CountDownLatch(1)
+        val doneLatch = CountDownLatch(threadCount)
+        val failure = AtomicReference<Throwable?>(null)
+        val executor = Executors.newFixedThreadPool(threadCount)
+
+        repeat(threadCount) { worker ->
+            executor.execute {
+                try {
+                    startLatch.await()
+                    repeat(iterationsPerThread) { iteration ->
+                        historyService.recordCommand(CommandEntry(
+                            toolName = "tool_${worker}_$iteration",
+                            parameters = buildJsonObject { }
+                        ))
+                    }
+                } catch (t: Throwable) {
+                    failure.compareAndSet(null, t)
+                } finally {
+                    doneLatch.countDown()
+                }
+            }
+        }
+
+        startLatch.countDown()
+        assertTrue("Concurrent recording did not finish in time", doneLatch.await(30, TimeUnit.SECONDS))
+        executor.shutdownNow()
+
+        failure.get()?.let { throw AssertionError("Concurrent recording should not throw", it) }
+
+        val history = historyService.entries
+        assertTrue("History should not exceed max size after concurrent writes", history.size <= 100)
+
+        val sentinel = CommandEntry(
+            toolName = "sentinel",
+            parameters = buildJsonObject { }
+        )
+        historyService.recordCommand(sentinel)
+        assertEquals("Newest entry should be first", sentinel.id, historyService.entries.first().id)
+    }
+
+    fun testMaxHistorySizeZeroDisablesAndClearsHistory() {
+        historyService.recordCommand(CommandEntry(
+            toolName = "before_disable",
+            parameters = buildJsonObject { }
+        ))
+        assertEquals(1, historyService.entries.size)
+
+        McpSettings.getInstance().maxHistorySize = 0
+
+        assertTrue("History should be cleared when max size is zero", historyService.entries.isEmpty())
+
+        historyService.recordCommand(CommandEntry(
+            toolName = "after_disable",
+            parameters = buildJsonObject { }
+        ))
+        assertTrue("History should stay empty when disabled", historyService.entries.isEmpty())
+    }
+
+    fun testNegativeMaxHistorySizeIsClampedToDisabled() {
+        historyService.recordCommand(CommandEntry(
+            toolName = "before_negative_disable",
+            parameters = buildJsonObject { }
+        ))
+        assertEquals(1, historyService.entries.size)
+
+        McpSettings.getInstance().maxHistorySize = -1
+
+        assertTrue("Negative max size should clear history", historyService.entries.isEmpty())
+
+        historyService.recordCommand(CommandEntry(
+            toolName = "after_negative_disable",
+            parameters = buildJsonObject { }
+        ))
+        assertTrue("Negative max size should disable recording", historyService.entries.isEmpty())
     }
 
     fun testExportToJson() {

@@ -121,6 +121,7 @@ class McpToolWindowPanel(
     }
 
     private fun refreshHistory() {
+        val selectedId = historyList.selectedValue?.id
         historyListModel.clear()
         val entries = if (currentFilter.isEmpty()) {
             historyService.entries
@@ -128,6 +129,23 @@ class McpToolWindowPanel(
             historyService.getFilteredHistory(currentFilter)
         }
         entries.forEach { historyListModel.addElement(it) }
+
+        val selectedIndex = selectedId?.let { id ->
+            (0 until historyListModel.size).firstOrNull { historyListModel.getElementAt(it).id == id }
+        }
+
+        when {
+            selectedIndex != null -> historyList.selectedIndex = selectedIndex
+            historyListModel.isEmpty() -> {
+                historyList.clearSelection()
+                detailsArea.text = ""
+            }
+            selectedId == null -> historyList.selectedIndex = 0
+            else -> {
+                historyList.clearSelection()
+                detailsArea.text = ""
+            }
+        }
     }
 
     private fun showCommandDetails(entry: CommandEntry) {
@@ -172,25 +190,15 @@ class McpToolWindowPanel(
     }
 
     override fun onCommandAdded(entry: CommandEntry) {
-        historyListModel.add(0, entry)
-        historyList.selectedIndex = 0
+        refreshHistory()
     }
 
     override fun onCommandUpdated(entry: CommandEntry) {
-        val index = (0 until historyListModel.size).firstOrNull {
-            historyListModel.getElementAt(it).id == entry.id
-        }
-        index?.let {
-            historyListModel.setElementAt(entry, it)
-            if (historyList.selectedIndex == it) {
-                showCommandDetails(entry)
-            }
-        }
+        refreshHistory()
     }
 
     override fun onHistoryCleared() {
-        historyListModel.clear()
-        detailsArea.text = ""
+        refreshHistory()
     }
 
     override fun serverStatusChanged() {

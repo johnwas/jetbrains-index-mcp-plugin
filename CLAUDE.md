@@ -64,7 +64,6 @@ src/
 │   │   │   └── transport/              # HTTP+SSE transport layer
 │   │   │       ├── KtorMcpServer.kt    # Embedded Ktor CIO server
 │   │   │       ├── KtorSseSessionManager.kt # SSE session management
-│   │   │       └── StreamableHttpSessionManager.kt # Streamable HTTP session management
 │   │   ├── startup/                    # Startup activities
 │   │   ├── tools/                      # MCP tool implementations
 │   │   │   ├── McpTool.kt             # Tool interface
@@ -153,9 +152,9 @@ MCP servers expose:
 **Transport**: This plugin supports two transports with JSON-RPC 2.0:
 
 *Streamable HTTP (Primary, MCP 2025-03-26):*
-- `POST /index-mcp/streamable-http` → JSON-RPC requests/responses with `Mcp-Session-Id` header
+- `POST /index-mcp/streamable-http` → Stateless JSON-RPC requests/responses
 - `GET /index-mcp/streamable-http` → 405 Method Not Allowed
-- `DELETE /index-mcp/streamable-http` → Session termination
+- `DELETE /index-mcp/streamable-http` → 405 Method Not Allowed
 
 *Legacy SSE (MCP 2024-11-05):*
 - `GET /index-mcp/sse` → Opens SSE stream, sends `endpoint` event with POST URL
