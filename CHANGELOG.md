@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+## [4.10.5] - 2026-04-15
+### Changed
+- Relaxed IDE compatability requirements to 2025.3+ build, to support Android Studio which doesn't have 2026 yet 
+
 ## [4.10.4] - 2026-04-12
 ### Fixed
 - Improved command history stability during concurrent MCP tool calls.
