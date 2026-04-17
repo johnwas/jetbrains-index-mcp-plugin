@@ -1,6 +1,7 @@
 package com.github.hechtcarmel.jetbrainsindexmcpplugin.handlers.javascript
 
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.handlers.*
+import com.github.hechtcarmel.jetbrainsindexmcpplugin.util.ProjectUtils
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.models.StructureKind
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.models.StructureNode
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.util.PluginDetectors
@@ -163,8 +164,7 @@ abstract class BaseJavaScriptHandler<T> : LanguageHandler<T> {
     }
 
     protected fun getRelativePath(project: Project, file: com.intellij.openapi.vfs.VirtualFile): String {
-        val basePath = project.basePath ?: return file.path
-        return file.path.removePrefix(basePath).removePrefix("/")
+        return ProjectUtils.getToolFilePath(project, file)
     }
 
     protected fun getLineNumber(project: Project, element: PsiElement): Int? {

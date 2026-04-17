@@ -98,7 +98,7 @@ Most tools operate on a specific location in code and require these parameters:
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `file` | string | Path to the file relative to project root (e.g., `src/main/java/MyClass.java`) |
+| `file` | string | For project files, path relative to project root (e.g., `src/main/java/MyClass.java`). `ide_read_file` and read-only position-based navigation tools also accept dependency/library paths returned by the plugin as absolute paths or `jar://` URLs. |
 | `line` | integer | 1-based line number |
 | `column` | integer | 1-based column number |
 
@@ -138,7 +138,7 @@ Finds all references to a symbol across the entire project using IntelliJ's sema
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `file` | string | Conditional | Path to the file relative to project root. Required for position-based lookup. |
+| `file` | string | Conditional | Project-relative file path, or a dependency/library absolute path or `jar://` URL previously returned by the plugin. Required for position-based lookup. |
 | `line` | integer | Conditional | 1-based line number. Required for position-based lookup. |
 | `column` | integer | Conditional | 1-based column number. Required for position-based lookup. |
 | `language` | string | Conditional | Language of the symbol (e.g., `"Java"`). Required for symbol-based lookup. |
@@ -226,7 +226,7 @@ Finds the definition/declaration location of a symbol at a given source location
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `file` | string | Conditional | Path to the file relative to project root. Required for position-based lookup. |
+| `file` | string | Conditional | Project-relative file path, or a dependency/library absolute path or `jar://` URL previously returned by the plugin. Required for position-based lookup. |
 | `line` | integer | Conditional | 1-based line number. Required for position-based lookup. |
 | `column` | integer | Conditional | 1-based column number. Required for position-based lookup. |
 | `language` | string | Conditional | Language of the symbol (e.g., `"Java"`). Required for symbol-based lookup. |
@@ -276,6 +276,8 @@ Finds the definition/declaration location of a symbol at a given source location
   "astPath": ["UserService"]
 }
 ```
+
+**Path note:** Project results use relative paths. Dependency/library results may use absolute paths or `jar://` URLs.
 
 ---
 
@@ -337,6 +339,8 @@ Searches for classes and interfaces by name using the IDE's class index.
 }
 ```
 
+**Path note:** Project results use relative paths. Dependency/library results may use absolute paths or `jar://` URLs.
+
 ---
 
 ### ide_find_file
@@ -386,6 +390,8 @@ Searches for files by name using the IDE's file index.
   "query": "UserService"
 }
 ```
+
+**Path note:** Project results use relative paths. Dependency/library results may use absolute paths or `jar://` URLs.
 
 ---
 
@@ -1178,7 +1184,7 @@ Analyzes method call relationships to find callers or callees.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `file` | string | Conditional | Path to the file relative to project root. Required for position-based lookup. |
+| `file` | string | Conditional | Project-relative file path, or a dependency/library absolute path or `jar://` URL previously returned by the plugin. Required for position-based lookup. |
 | `line` | integer | Conditional | 1-based line number. Required for position-based lookup. |
 | `column` | integer | Conditional | 1-based column number. Required for position-based lookup. |
 | `language` | string | Conditional | Language of the symbol (e.g., `"Java"`). Required for symbol-based lookup. |
@@ -1265,7 +1271,7 @@ Finds all concrete implementations of an interface, abstract class, or abstract 
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `file` | string | Conditional | Path to the file relative to project root. Required for position-based lookup. |
+| `file` | string | Conditional | Project-relative file path, or a dependency/library absolute path or `jar://` URL previously returned by the plugin. Required for position-based lookup. |
 | `line` | integer | Conditional | 1-based line number. Required for position-based lookup. |
 | `column` | integer | Conditional | 1-based column number. Required for position-based lookup. |
 | `language` | string | Conditional | Language of the symbol (e.g., `"Java"`). Required for symbol-based lookup. |
@@ -1422,6 +1428,8 @@ Searches for code symbols (classes, interfaces, methods, fields) by name using t
 }
 ```
 
+**Path note:** Project results use relative paths. Dependency/library results may use absolute paths or `jar://` URLs.
+
 **Kind Values:**
 - `CLASS` - Concrete class
 - `ABSTRACT_CLASS` - Abstract class
@@ -1454,7 +1462,7 @@ Finds the complete inheritance hierarchy for a method - all parent methods it ov
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `file` | string | Conditional | Path to the file relative to project root. Required for position-based lookup. |
+| `file` | string | Conditional | Project-relative file path, or a dependency/library absolute path or `jar://` URL previously returned by the plugin. Required for position-based lookup. |
 | `line` | integer | Conditional | 1-based line number (any line within the method). Required for position-based lookup. |
 | `column` | integer | Conditional | 1-based column number (any position within the method). Required for position-based lookup. |
 | `language` | string | Conditional | Language of the symbol (e.g., `"Java"`). Required for symbol-based lookup. |

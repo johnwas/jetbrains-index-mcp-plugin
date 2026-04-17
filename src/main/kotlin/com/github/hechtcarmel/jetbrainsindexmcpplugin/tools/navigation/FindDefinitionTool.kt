@@ -42,7 +42,7 @@ class FindDefinitionTool : AbstractMcpTool() {
 
     override val inputSchema: JsonObject = SchemaBuilder.tool()
         .projectPath()
-        .file(required = false)
+        .file(required = false, description = "Project-relative file path, or a dependency/library absolute path or jar:// URL previously returned by the plugin. Required for position-based lookup.")
         .lineAndColumn(required = false)
         .languageAndSymbol(required = false)
         .booleanProperty(ParamNames.FULL_ELEMENT_PREVIEW, "If true, returns the complete element code instead of a preview snippet. Optional, defaults to false.")
@@ -57,7 +57,7 @@ class FindDefinitionTool : AbstractMcpTool() {
         requireSmartMode(project)
 
         return suspendingReadAction {
-            val element = resolveElementFromArguments(project, arguments).getOrElse {
+            val element = resolveElementFromArguments(project, arguments, allowLibraryFilesForPosition = true).getOrElse {
                 return@suspendingReadAction createErrorResult(it.message ?: ErrorMessages.COULD_NOT_RESOLVE_SYMBOL)
             }
 

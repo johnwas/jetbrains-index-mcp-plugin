@@ -3,6 +3,8 @@
 # IDE Index MCP Server Changelog
 
 ## [Unreleased]
+### Fixed
+- **External library path round-tripping in read-only navigation tools** — Search results now preserve dependency/library paths, and read-only position-based navigation tools accept those returned absolute paths or `jar://` URLs. Fixes [#135](https://github.com/hechtcarmel/jetbrains-index-mcp-plugin/issues/135).
 
 ## [4.11.1] - 2026-04-16
 ### Fixed

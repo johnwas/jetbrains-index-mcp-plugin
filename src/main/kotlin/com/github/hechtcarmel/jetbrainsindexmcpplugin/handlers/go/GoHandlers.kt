@@ -1,6 +1,7 @@
 package com.github.hechtcarmel.jetbrainsindexmcpplugin.handlers.go
 
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.handlers.*
+import com.github.hechtcarmel.jetbrainsindexmcpplugin.util.ProjectUtils
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.util.PluginDetectors
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.project.Project
@@ -184,8 +185,7 @@ abstract class BaseGoHandler<T> : LanguageHandler<T> {
     // Helper methods
 
     protected fun getRelativePath(project: Project, file: com.intellij.openapi.vfs.VirtualFile): String {
-        val basePath = project.basePath ?: return file.path
-        return file.path.removePrefix(basePath).removePrefix("/")
+        return ProjectUtils.getToolFilePath(project, file)
     }
 
     protected fun getLineNumber(project: Project, element: PsiElement): Int? {

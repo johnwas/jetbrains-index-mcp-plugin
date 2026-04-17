@@ -47,7 +47,7 @@ class CallHierarchyTool : AbstractMcpTool() {
 
     override val inputSchema: JsonObject = SchemaBuilder.tool()
         .projectPath()
-        .file(required = false)
+        .file(required = false, description = "Project-relative file path, or a dependency/library absolute path or jar:// URL previously returned by the plugin. Required for position-based lookup.")
         .lineAndColumn(required = false)
         .languageAndSymbol(required = false)
         .enumProperty("direction", "Direction: 'callers' (methods that call this method) or 'callees' (methods this method calls)", listOf("callers", "callees"), required = true)
@@ -73,7 +73,7 @@ class CallHierarchyTool : AbstractMcpTool() {
         return suspendingReadAction {
             ProgressManager.checkCanceled() // Allow cancellation
 
-            val element = resolveElementFromArguments(project, arguments).getOrElse {
+            val element = resolveElementFromArguments(project, arguments, allowLibraryFilesForPosition = true).getOrElse {
                 return@suspendingReadAction createErrorResult(it.message ?: ErrorMessages.COULD_NOT_RESOLVE_SYMBOL)
             }
 

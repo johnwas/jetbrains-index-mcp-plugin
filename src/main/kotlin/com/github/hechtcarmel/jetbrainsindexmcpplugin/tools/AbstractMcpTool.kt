@@ -12,6 +12,7 @@ import com.github.hechtcarmel.jetbrainsindexmcpplugin.server.models.ToolCallResu
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.settings.McpSettings
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.util.ClassResolver
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.util.ProjectUtils
+import com.github.hechtcarmel.jetbrainsindexmcpplugin.util.PsiUtils
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.EDT
 import com.intellij.openapi.application.ModalityState
@@ -379,6 +380,18 @@ abstract class AbstractMcpTool : McpTool {
     }
 
     /**
+     * Gets the PSI file for a navigation target path.
+     *
+     * Unlike [getPsiFile], this may resolve files from project dependencies/libraries
+     * in addition to project content roots. It is intended only for read-only
+     * navigation flows that need to round-trip tool output back into PSI.
+     */
+    protected fun getNavigablePsiFile(project: Project, path: String): PsiFile? {
+        val virtualFile = PsiUtils.resolveNavigableVirtualFile(project, path) ?: return null
+        return PsiManager.getInstance(project).findFile(virtualFile)
+    }
+
+    /**
      * Finds the PSI element at a specific position in a file.
      *
      * @param project The project context
@@ -401,6 +414,25 @@ abstract class AbstractMcpTool : McpTool {
     }
 
     /**
+     * Finds a PSI element in a read-only navigation target.
+     *
+     * Supports the same project/content-root files as [findPsiElement] plus library
+     * files that are part of the current project's dependency graph.
+     */
+    protected fun findNavigablePsiElement(
+        project: Project,
+        file: String,
+        line: Int,
+        column: Int
+    ): PsiElement? {
+        val psiFile = getNavigablePsiFile(project, file) ?: return null
+        val document = PsiDocumentManager.getInstance(project).getDocument(psiFile) ?: return null
+
+        val offset = getOffset(document, line, column) ?: return null
+        return psiFile.findElementAt(offset)
+    }
+
+    /**
      * Resolves a PSI element from arguments using either `language`+`symbol` or `file`+`line`+`column`.
      *
      * These two parameter groups are mutually exclusive.
@@ -415,7 +447,8 @@ abstract class AbstractMcpTool : McpTool {
     @RequiresReadLock
     protected fun resolveElementFromArguments(
         project: Project,
-        arguments: JsonObject
+        arguments: JsonObject,
+        allowLibraryFilesForPosition: Boolean = false
     ): Result<PsiElement> {
         val language = arguments[ParamNames.LANGUAGE]?.jsonPrimitive?.content
         val symbol = arguments[ParamNames.SYMBOL]?.jsonPrimitive?.content
@@ -447,7 +480,11 @@ abstract class AbstractMcpTool : McpTool {
             if (line == null) return ErrorMessages.missingParamForPosition(ParamNames.LINE, "file or column").toArgumentFailure()
             if (column == null) return ErrorMessages.missingParamForPosition(ParamNames.COLUMN, "file or line").toArgumentFailure()
 
-            val element = findPsiElement(project, file, line, column)
+            val element = if (allowLibraryFilesForPosition) {
+                findNavigablePsiElement(project, file, line, column)
+            } else {
+                findPsiElement(project, file, line, column)
+            }
                 ?: return ErrorMessages.noElementAtPosition(file, line, column).toArgumentFailure()
 
             return Result.success(element)

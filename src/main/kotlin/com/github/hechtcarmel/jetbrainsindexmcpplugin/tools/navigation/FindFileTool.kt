@@ -10,6 +10,7 @@ import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.AbstractMcpTool
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.models.FileMatch
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.models.FindFileResult
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.schema.SchemaBuilder
+import com.github.hechtcarmel.jetbrainsindexmcpplugin.util.ProjectUtils
 import com.intellij.navigation.ChooseByNameContributor
 import com.intellij.navigation.ChooseByNameContributorEx
 import com.intellij.navigation.NavigationItem
@@ -298,9 +299,8 @@ class FindFileTool : AbstractMcpTool() {
             }
         } ?: return null
 
-        val basePath = project.basePath ?: ""
-        val relativePath = virtualFile.path.removePrefix(basePath).removePrefix("/")
-        val directory = virtualFile.parent?.path?.removePrefix(basePath)?.removePrefix("/") ?: ""
+        val relativePath = ProjectUtils.getToolFilePath(project, virtualFile)
+        val directory = virtualFile.parent?.let { ProjectUtils.getToolFilePath(project, it) } ?: ""
 
         return FileMatch(
             name = virtualFile.name,

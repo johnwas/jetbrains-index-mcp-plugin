@@ -93,11 +93,7 @@ class ReadFileTool : AbstractMcpTool() {
             val lineCount = document?.lineCount ?: fullText?.split("\n")?.size ?: content.split("\n").size
             val language = psiFile?.language?.id
 
-            val resolvedPath = when {
-                ProjectUtils.isProjectFile(project, virtualFile) -> ProjectUtils.getRelativePath(project, virtualFile)
-                virtualFile.fileSystem.protocol == "jar" -> virtualFile.url
-                else -> virtualFile.path
-            }
+            val resolvedPath = ProjectUtils.getToolFilePath(project, virtualFile)
 
             val isLibraryFile = !ProjectUtils.isProjectFile(project, virtualFile) ||
                 virtualFile.fileSystem.protocol == "jar"

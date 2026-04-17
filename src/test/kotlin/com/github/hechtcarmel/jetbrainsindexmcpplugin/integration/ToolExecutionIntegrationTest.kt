@@ -6,20 +6,26 @@ import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.ToolRegistry
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.intelligence.GetDiagnosticsTool
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.navigation.CallHierarchyTool
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.navigation.FindImplementationsTool
+import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.navigation.FindFileTool
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.navigation.FindUsagesTool
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.navigation.FindDefinitionTool
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.navigation.TypeHierarchyTool
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.navigation.ReadFileTool
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.models.DefinitionResult
+import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.models.FindFileResult
+import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.models.FindUsagesResult
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.models.ReadFileResult
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.project.GetIndexStatusTool
 import com.intellij.openapi.project.DumbService
+import com.intellij.openapi.roots.ModuleRootModificationUtil
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.psi.PsiDocumentManager
 import com.intellij.psi.PsiManager
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import java.io.File
 import java.nio.file.Files
+import java.nio.file.Path
+import javax.tools.ToolProvider
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.decodeFromString
@@ -201,6 +207,161 @@ class ToolExecutionIntegrationTest : BasePlatformTestCase() {
         assertEquals(4, singleResult.endLine)
     }
 
+    fun testFindFileToolPreservesAbsolutePathForLibrarySources() = runBlocking {
+        if (DumbService.isDumb(project)) return@runBlocking
+
+        val libraryRoot = Files.createTempDirectory("jetbrains-index-mcp-lib")
+        val packageDir = Files.createDirectories(libraryRoot.resolve("libpkg"))
+        val className = "ExternalLib${System.nanoTime().toString().takeLast(8)}"
+        val libraryFile = packageDir.resolve("$className.java")
+        Files.writeString(
+            libraryFile,
+            """
+            package libpkg;
+
+            public class $className {}
+            """.trimIndent()
+        )
+
+        val libraryRootVFile = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(libraryRoot)
+        assertNotNull("Library root should resolve in VFS", libraryRootVFile)
+        ModuleRootModificationUtil.addModuleLibrary(module, "external-library-src", emptyList(), listOf(libraryRootVFile!!.url))
+        DumbService.getInstance(project).waitForSmartMode()
+
+        val tool = FindFileTool()
+        val result = tool.execute(project, buildJsonObject {
+            put("query", "$className.java")
+            put("includeLibraries", true)
+        })
+
+        assertFalse("Library file search should succeed", result.isError)
+        val content = result.content.first() as ContentBlock.Text
+        val findFile = json.decodeFromString<FindFileResult>(content.text)
+        val match = findFile.files.firstOrNull { it.name == "$className.java" }
+        assertNotNull("Library file should be returned when includeLibraries=true", match)
+        assertEquals(
+            "External library paths should remain absolute",
+            libraryFile.toString().replace('\\', '/'),
+            match!!.path
+        )
+    }
+
+    fun testFindDefinitionToolResolvesLibrarySourceByAbsolutePath() = runBlocking {
+        val libraryRoot = Files.createTempDirectory("jetbrains-index-mcp-lib")
+        val packageDir = Files.createDirectories(libraryRoot.resolve("libpkg"))
+        val className = "ExternalLib${System.nanoTime().toString().takeLast(8)}"
+        val libraryFile = packageDir.resolve("$className.java")
+        Files.writeString(
+            libraryFile,
+            """
+            package libpkg;
+
+            public class $className {
+                public void ping() {}
+            }
+            """.trimIndent()
+        )
+
+        val libraryRootVFile = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(libraryRoot)
+        assertNotNull("Library root should resolve in VFS", libraryRootVFile)
+        ModuleRootModificationUtil.addModuleLibrary(module, "external-library-src", emptyList(), listOf(libraryRootVFile!!.url))
+        DumbService.getInstance(project).waitForSmartMode()
+
+        val tool = FindDefinitionTool()
+        val result = tool.execute(project, buildJsonObject {
+            put("file", libraryFile.toString().replace('\\', '/'))
+            put("line", 3)
+            put("column", 14)
+        })
+
+        assertFalse("Library source definition lookup should succeed", result.isError)
+        val content = result.content.first() as ContentBlock.Text
+        val definition = json.decodeFromString<DefinitionResult>(content.text)
+        assertEquals(libraryFile.toString().replace('\\', '/'), definition.file)
+        assertEquals(className, definition.symbolName)
+    }
+
+    fun testFindDefinitionToolStillRejectsUnrelatedExternalFiles() = runBlocking {
+        val unrelatedFile = Files.createTempFile("jetbrains-index-mcp-unrelated", ".java")
+        Files.writeString(
+            unrelatedFile,
+            """
+            public class Unrelated {}
+            """.trimIndent()
+        )
+        LocalFileSystem.getInstance().refreshAndFindFileByNioFile(unrelatedFile)
+
+        val tool = FindDefinitionTool()
+        val result = tool.execute(project, buildJsonObject {
+            put("file", unrelatedFile.toString().replace('\\', '/'))
+            put("line", 1)
+            put("column", 14)
+        })
+
+        assertTrue("Unrelated external files must remain inaccessible", result.isError)
+    }
+
+    fun testFindUsagesToolFindsProjectUsagesFromLibrarySourcePath() = runBlocking {
+        if (DumbService.isDumb(project)) return@runBlocking
+
+        val className = "ExternalLib${System.nanoTime().toString().takeLast(8)}"
+        val sourceRoot = Files.createTempDirectory("jetbrains-index-mcp-lib-src")
+        val classesRoot = Files.createTempDirectory("jetbrains-index-mcp-lib-classes")
+        val packageDir = Files.createDirectories(sourceRoot.resolve("libpkg"))
+        val libraryFile = packageDir.resolve("$className.java")
+        val librarySource = """
+            package libpkg;
+
+            public class $className {
+                public static void ping() {}
+            }
+        """.trimIndent()
+        Files.writeString(libraryFile, librarySource)
+        compileJavaSource(libraryFile, classesRoot)
+
+        val sourceRootVFile = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(sourceRoot)
+        val classesRootVFile = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(classesRoot)
+        assertNotNull("Library source root should resolve in VFS", sourceRootVFile)
+        assertNotNull("Library classes root should resolve in VFS", classesRootVFile)
+        ModuleRootModificationUtil.addModuleLibrary(
+            module,
+            "external-library-bin-and-src",
+            listOf(classesRootVFile!!.url),
+            listOf(sourceRootVFile!!.url)
+        )
+
+        myFixture.addFileToProject(
+            "UseExternalLib.java",
+            """
+            import libpkg.$className;
+
+            public class UseExternalLib {
+                public void call() {
+                    $className.ping();
+                }
+            }
+            """.trimIndent()
+        )
+
+        DumbService.getInstance(project).waitForSmartMode()
+
+        val (line, column) = findPosition(librarySource, "ping")
+        val tool = FindUsagesTool()
+        val result = tool.execute(project, buildJsonObject {
+            put("file", libraryFile.toString().replace('\\', '/'))
+            put("line", line)
+            put("column", column)
+        })
+
+        assertFalse("Library-source usages lookup should succeed", result.isError)
+        val content = result.content.first() as ContentBlock.Text
+        val usages = json.decodeFromString<FindUsagesResult>(content.text)
+        assertTrue(
+            "Project usage should be found from external library declaration",
+            usages.usages.any { it.file.endsWith("UseExternalLib.java") && it.context.contains("$className.ping()") }
+        )
+    }
+
     fun testTypeHierarchyToolEndToEnd() = runBlocking {
         val tool = TypeHierarchyTool()
 
@@ -373,5 +534,47 @@ class ToolExecutionIntegrationTest : BasePlatformTestCase() {
                 }
             }
         }
+    }
+
+    private fun compileJavaSource(sourceFile: Path, outputDir: Path) {
+        val compiler = ToolProvider.getSystemJavaCompiler()
+        val exitCode = if (compiler != null) {
+            compiler.run(
+                null,
+                null,
+                null,
+                "-d",
+                outputDir.toString(),
+                sourceFile.toString()
+            )
+        } else {
+            val javaHome = System.getenv("JAVA_HOME")
+            assertNotNull("Tests require a JDK with javac available", javaHome)
+
+            val javac = Path.of(javaHome!!, "bin", "javac").toString()
+            val process = ProcessBuilder(
+                javac,
+                "-d",
+                outputDir.toString(),
+                sourceFile.toString()
+            ).redirectErrorStream(true).start()
+            process.inputStream.bufferedReader().use { reader ->
+                val output = reader.readText()
+                val completed = process.waitFor()
+                assertEquals("javac should compile library source successfully. Output: $output", 0, completed)
+            }
+            0
+        }
+        assertEquals("Library source should compile successfully", 0, exitCode)
+    }
+
+    private fun findPosition(text: String, needle: String): Pair<Int, Int> {
+        val offset = text.indexOf(needle)
+        assertTrue("Needle '$needle' should exist in fixture text", offset >= 0)
+
+        val before = text.substring(0, offset)
+        val line = before.count { it == '\n' } + 1
+        val column = offset - before.lastIndexOf('\n').let { if (it == -1) -1 else it } 
+        return line to column
     }
 }

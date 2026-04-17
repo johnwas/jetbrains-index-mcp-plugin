@@ -12,6 +12,7 @@ import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.AbstractMcpTool
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.models.FindClassResult
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.models.SymbolMatch
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.schema.SchemaBuilder
+import com.github.hechtcarmel.jetbrainsindexmcpplugin.util.ProjectUtils
 import com.intellij.navigation.ChooseByNameContributor
 import com.intellij.navigation.ChooseByNameContributorEx
 import com.intellij.navigation.NavigationItem
@@ -318,8 +319,7 @@ class FindClassTool : AbstractMcpTool() {
         val targetElement = element.navigationElement ?: element
 
         val file = targetElement.containingFile?.virtualFile ?: return null
-        val basePath = project.basePath ?: ""
-        val relativePath = file.path.removePrefix(basePath).removePrefix("/")
+        val relativePath = ProjectUtils.getToolFilePath(project, file)
 
         val name = when (targetElement) {
             is PsiNamedElement -> targetElement.name

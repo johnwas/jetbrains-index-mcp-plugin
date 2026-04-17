@@ -157,6 +157,38 @@ object PsiUtils {
         return getVirtualFile(project, normalizedPath)
     }
 
+    fun resolveNavigableVirtualFile(project: Project, path: String): VirtualFile? {
+        // Match resolveVirtualFileAnywhere() semantics for path normalization.
+        val normalizedPath = if (SystemInfo.isWindows) path.replace('\\', '/') else path
+        val virtualFileManager = VirtualFileManager.getInstance()
+        val rootCandidates = sequence {
+            project.basePath?.let { yield(it) }
+            for (root in ProjectUtils.getModuleContentRoots(project)) {
+                yield(root)
+            }
+        }
+
+        val resolved = when {
+            normalizedPath.startsWith("jar://") -> virtualFileManager.findFileByUrl(normalizedPath)
+            normalizedPath.contains(".jar!/") -> {
+                val parts = normalizedPath.split("!/", limit = 2)
+                if (parts.size != 2) {
+                    null
+                } else {
+                    val jarPath = parts[0]
+                    val internalPath = parts[1]
+                    val homeExpandedJarPath = expandHome(jarPath)
+                    val absoluteJarPath = resolveAbsolutePathString(homeExpandedJarPath, rootCandidates)
+                        ?: homeExpandedJarPath
+                    virtualFileManager.findFileByUrl("jar://$absoluteJarPath!/$internalPath")
+                }
+            }
+            else -> resolveLocalFile(normalizedPath, rootCandidates)
+        } ?: return null
+
+        return resolved.takeIf { ProjectUtils.isAccessibleFile(project, it) }
+    }
+
     fun resolveLocalFile(path: String, rootCandidates: Sequence<String>): VirtualFile? {
         val expandedPath = expandHome(path)
         // resolveAbsolutePath handles both absolute paths and relative paths against each root candidate.
