@@ -4,6 +4,44 @@
 
 ## [Unreleased]
 
+## [4.13.0] - 2026-04-18
+### Changed
+- **Breaking: covered navigation and adjacent search tools now use built-in `scope` instead of `includeLibraries` / `includeTests`** — `ide_find_references`, `ide_find_implementations`, `ide_call_hierarchy`, `ide_type_hierarchy`, `ide_find_class`, `ide_find_file`, and `ide_find_symbol` now accept `scope` with the built-in values `project_files`, `project_and_libraries`, `project_production_files`, and `project_test_files`. The old boolean parameters are no longer part of the public contract.
+
+### Fixed
+- **Covered search/navigation tools now honor the requested built-in scope end-to-end** — library, production-only, and test-only searches now use explicit scoped IntelliJ searches instead of collapsing back to legacy boolean behavior in tool, handler, or contributor fallback paths.
+
+## [4.12.0] - 2026-04-18
+### Added
+- **Optional library/test filters for navigation tools** — `ide_find_implementations`, `ide_call_hierarchy`, `ide_type_hierarchy`, and `ide_find_references` now accept `includeLibraries` and `includeTests`, both defaulting to `true`, so agents can suppress dependency noise and test-only results when narrowing navigation queries. Addresses [#138](https://github.com/hechtcarmel/jetbrains-index-mcp-plugin/issues/138).
+
+### Fixed
+- **`includeLibraries=true` now widens hierarchy search scopes correctly** — call-hierarchy and related language-specific navigation searches no longer stay pinned to project-only scope when library results are requested, so callers/implementations from dependency sources can be returned again for library-backed targets.
+- **Navigation library/test filtering uses IntelliJ file-index classification** — project files are no longer misclassified as dependencies when filtering results, which preserves project implementations while still excluding actual library/test nodes.
+
+## [4.11.3] - 2026-04-17
+### Changed
+- Completely reworked `ide_diagnostics` for better reliability and multi-project support.
+
+## [4.11.2] - 2026-04-17
+### Fixed
+- **External library path round-tripping in read-only navigation tools** — Search results now preserve dependency/library paths, and read-only position-based navigation tools accept those returned absolute paths or `jar://` URLs. Fixes [#135](https://github.com/hechtcarmel/jetbrains-index-mcp-plugin/issues/135).
+- **Python dotted member definition resolution** — Position-based navigation now prefers the Python callable/member target for dotted expressions like `json.dumps`, `os.path.join`, and `datetime.datetime.now()` when the caret is on the member token, instead of incorrectly jumping to a module/package directory.
+- **Python supertypes and super-method hierarchies** — `ide_type_hierarchy` now returns Python supertypes again, and `ide_find_super_methods` now returns inherited Python override chains instead of empty hierarchies.
+
+## [4.11.1] - 2026-04-16
+### Fixed
+- **`ide_call_hierarchy` callers for Python functions in PyCharm** — Replaced the generic `ReferencesSearch`-based incoming call path with PyCharm's own Python call hierarchy API (`PyStaticCallHierarchyUtil.getCallers()`), so Python caller results now match the IDE's native behavior. Fixes [#133](https://github.com/hechtcarmel/jetbrains-index-mcp-plugin/issues/133).
+- **Python caller hierarchy compatibility failures are now explicit** — If the required PyCharm Python call hierarchy API is missing or incompatible in the current IDE/Python plugin build, the tool now returns a clear error instead of silently degrading to potentially incorrect results.
+
+## [4.11.0] - 2026-04-15
+### Added
+- Added a **Project list in error responses** setting with `Expanded` and `Compact` modes. Workspace sub-project/module content roots remain valid `project_path` targets, while compact mode limits invalid/missing `project_path` errors to top-level project roots only.
+
+## [4.10.5] - 2026-04-15
+### Changed
+- Relaxed IDE compatability requirements to 2025.3+ build, to support Android Studio which doesn't have 2026 yet 
+
 ## [4.10.4] - 2026-04-12
 ### Fixed
 - Improved command history stability during concurrent MCP tool calls.

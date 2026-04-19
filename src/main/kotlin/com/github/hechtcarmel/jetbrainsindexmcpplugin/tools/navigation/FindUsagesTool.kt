@@ -1,8 +1,11 @@
 package com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.navigation
 
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.constants.ErrorMessages
+import com.github.hechtcarmel.jetbrainsindexmcpplugin.constants.ParamNames
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.constants.ToolNames
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.constants.UsageTypes
+import com.github.hechtcarmel.jetbrainsindexmcpplugin.handlers.BuiltInSearchScope
+import com.github.hechtcarmel.jetbrainsindexmcpplugin.handlers.BuiltInSearchScopeResolver
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.server.PaginationService
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.server.ProjectResolver
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.server.models.ToolCallResult
@@ -26,8 +29,13 @@ import com.intellij.util.Processor
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 
 class FindUsagesTool : AbstractMcpTool() {
 
@@ -54,20 +62,21 @@ class FindUsagesTool : AbstractMcpTool() {
 
         Target (mutually exclusive):
         - file + line + column: position-based lookup (necessary for fresh search, ignored when cursor is provided)
-        - language + symbol: fully qualified symbol reference (necessary for fresh search, ignored when cursor is provided)
+        - language + symbol: fully qualified symbol reference (currently supported for Java only; necessary for fresh search, ignored when cursor is provided)
         - cursor: pagination cursor from a previous response
 
-        Parameters: pageSize (optional, default: 100, max: 500).
+        Parameters: scope (optional, default: "project_files"; supported: project_files, project_and_libraries, project_production_files, project_test_files), pageSize (optional, default: 100, max: 500).
 
         Example: {"file": "src/UserService.java", "line": 25, "column": 18}
-        Example: {"language": "Java", "symbol": "com.example.UserService#findUser(String)"}
+        Example: {"language": "Java", "symbol": "com.example.UserService#findUser(String)", "scope": "project_and_libraries"}
     """.trimIndent()
 
     override val inputSchema: JsonObject = SchemaBuilder.tool()
         .projectPath()
-        .file(required = false)
+        .file(required = false, description = "Project-relative file path, or a dependency/library absolute path or jar:// URL previously returned by the plugin. Required for position-based lookup.")
         .lineAndColumn(required = false)
         .languageAndSymbol(required = false)
+        .scopeProperty("Search scope. Default: project_files.")
         .intProperty("maxResults", "Maximum results per page (deprecated, use pageSize). Default: $DEFAULT_MAX_RESULTS, max: $MAX_PAGE_SIZE.")
         .stringProperty("cursor", "Pagination cursor from a previous response. When provided, returns the next page of results. Search parameters are ignored; project_path and pageSize may still be provided.")
         .intProperty("pageSize", "Results per page. Default: $DEFAULT_MAX_RESULTS, max: $MAX_PAGE_SIZE.")
@@ -94,11 +103,18 @@ class FindUsagesTool : AbstractMcpTool() {
 
         val pageSize = resolvePageSize(arguments, DEFAULT_MAX_RESULTS, aliases = arrayOf("maxResults"))
         val collectLimit = maxOf(PaginationService.DEFAULT_OVERCOLLECT, pageSize)
-
+        val rawScope = rawScopeValue(arguments[ParamNames.SCOPE])
+        val scope = try {
+            BuiltInSearchScopeResolver.parse(arguments, BuiltInSearchScope.PROJECT_FILES)
+        } catch (_: IllegalArgumentException) {
+            return createInvalidScopeError(rawScope)
+        } catch (_: IllegalStateException) {
+            return createInvalidScopeError(rawScope)
+        }
         requireSmartMode(project)
 
         val cursorToken = suspendingReadAction {
-            val element = resolveElementFromArguments(project, arguments).getOrElse {
+            val element = resolveElementFromArguments(project, arguments, allowLibraryFilesForPosition = true).getOrElse {
                 return@suspendingReadAction null to createErrorResult(it.message ?: ErrorMessages.COULD_NOT_RESOLVE_SYMBOL)
             }
 
@@ -111,14 +127,15 @@ class FindUsagesTool : AbstractMcpTool() {
             val usages = ConcurrentLinkedQueue<UsageLocation>()
             val totalFound = AtomicInteger(0)
             val totalCountLimit = collectLimit * 10
+            val searchScope = BuiltInSearchScopeResolver.resolveGlobalScope(project, scope)
 
             try {
-                ReferencesSearch.search(targetElement).forEach(Processor { reference ->
+                ReferencesSearch.search(targetElement, searchScope).forEach(Processor { reference ->
                     ProgressManager.checkCanceled()
 
                     val refElement = reference.element
                     val refFile = refElement.containingFile?.virtualFile
-                    if (refFile != null) {
+                    if (refFile != null && searchScope.contains(refFile)) {
                         val total = totalFound.incrementAndGet()
 
                         if (total <= collectLimit) {
@@ -166,7 +183,7 @@ class FindUsagesTool : AbstractMcpTool() {
                 suspendingReadAction {
                     val el = smartPointer.element
                         ?: throw IllegalStateException("Target element no longer valid")
-                    extendFindUsages(project, el, seenKeys, limit)
+                    extendFindUsages(project, el, seenKeys, limit, scope)
                 }
             }
 
@@ -218,17 +235,19 @@ class FindUsagesTool : AbstractMcpTool() {
         project: Project,
         targetElement: PsiElement,
         seenKeys: Set<String>,
-        limit: Int
+        limit: Int,
+        scope: BuiltInSearchScope
     ): List<PaginationService.SerializedResult> {
         val newResults = ConcurrentLinkedQueue<PaginationService.SerializedResult>()
         val count = AtomicInteger(0)
+        val searchScope = BuiltInSearchScopeResolver.resolveGlobalScope(project, scope)
 
         try {
-            ReferencesSearch.search(targetElement).forEach(Processor { reference ->
+            ReferencesSearch.search(targetElement, searchScope).forEach(Processor { reference ->
                 ProgressManager.checkCanceled()
                 val refElement = reference.element
                 val refFile = refElement.containingFile?.virtualFile
-                if (refFile != null) {
+                if (refFile != null && searchScope.contains(refFile)) {
                     val document = PsiDocumentManager.getInstance(project).getDocument(refElement.containingFile)
                     if (document != null) {
                         val lineNumber = document.getLineNumber(refElement.textOffset) + 1
@@ -278,6 +297,22 @@ class FindUsagesTool : AbstractMcpTool() {
             parentClass.contains("Parameter") -> UsageTypes.PARAMETER
             parentClass.contains("Variable") -> UsageTypes.VARIABLE
             else -> UsageTypes.REFERENCE
-        }
+            }
     }
+
+    private fun rawScopeValue(scopeElement: JsonElement?): String = when (scopeElement) {
+        null -> ""
+        is JsonPrimitive -> scopeElement.content
+        else -> scopeElement.toString()
+    }
+
+    private fun createInvalidScopeError(provided: String): ToolCallResult =
+        createErrorResult(buildJsonObject {
+            put("error", JsonPrimitive("invalid_scope"))
+            put("parameter", JsonPrimitive(ParamNames.SCOPE))
+            put("provided", JsonPrimitive(provided))
+            put("supportedValues", buildJsonArray {
+                BuiltInSearchScope.supportedWireValues().forEach { add(JsonPrimitive(it)) }
+            })
+        }.toString())
 }

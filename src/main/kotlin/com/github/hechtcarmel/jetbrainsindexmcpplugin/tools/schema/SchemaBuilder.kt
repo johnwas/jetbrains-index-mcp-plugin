@@ -2,6 +2,7 @@ package com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.schema
 
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.constants.ParamNames
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.constants.SchemaConstants
+import com.github.hechtcarmel.jetbrainsindexmcpplugin.handlers.BuiltInSearchScope
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.handlers.LanguageHandlerRegistry
 import kotlinx.serialization.json.*
 
@@ -43,7 +44,15 @@ class SchemaBuilder private constructor() {
         val supportedLanguages = LanguageHandlerRegistry.getSupportedLanguageNamesForSymbolReference()
         properties[ParamNames.LANGUAGE] = buildJsonObject {
             put(SchemaConstants.TYPE, SchemaConstants.TYPE_STRING)
-            put(SchemaConstants.DESCRIPTION, SchemaConstants.DESC_LANGUAGE)
+            val languageDescription = buildString {
+                append(SchemaConstants.DESC_LANGUAGE)
+                if (supportedLanguages.isEmpty()) {
+                    append(" No symbol reference handlers are currently available.")
+                } else {
+                    append(" Currently supported languages: ${supportedLanguages.joinToString(", ")}.")
+                }
+            }
+            put(SchemaConstants.DESCRIPTION, languageDescription)
             if (supportedLanguages.isNotEmpty()) {
                 putJsonArray("enum") { supportedLanguages.forEach { add(JsonPrimitive(it)) } }
             }
@@ -89,6 +98,15 @@ class SchemaBuilder private constructor() {
             putJsonArray("enum") { values.forEach { add(JsonPrimitive(it)) } }
         }
         if (required) requiredFields.add(name)
+    }
+
+    fun scopeProperty(description: String, required: Boolean = false) = apply {
+        enumProperty(
+            name = ParamNames.SCOPE,
+            description = description,
+            values = BuiltInSearchScope.supportedWireValues(),
+            required = required
+        )
     }
 
     fun property(name: String, schema: JsonObject, required: Boolean = false) = apply {

@@ -17,7 +17,7 @@ These tools work in **every** JetBrains IDE:
 | `ide_find_class` | Search classes/interfaces by name | Enabled |
 | `ide_find_file` | Search files by name | Enabled |
 | `ide_search_text` | Text search using word index | Enabled |
-| `ide_diagnostics` | Analyze code for problems and intentions | Enabled |
+| `ide_diagnostics` | Analyze file problems with fresh IDE diagnostics, plus optional build/test results | Enabled |
 | `ide_index_status` | Check indexing status | Enabled |
 | `ide_sync_files` | Force sync VFS/PSI cache | Enabled |
 | `ide_build_project` | Build project with structured errors | Disabled |
@@ -98,9 +98,9 @@ Most tools operate on a specific location in code and require these parameters:
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `file` | string | Path to the file relative to project root (e.g., `src/main/java/MyClass.java`) |
+| `file` | string | For project files, path relative to project root (e.g., `src/main/java/MyClass.java`). `ide_read_file` and read-only position-based navigation tools also accept dependency/library paths returned by the plugin as absolute paths or `jar://` URLs. |
 | `line` | integer | 1-based line number |
-| `column` | integer | 1-based column number |
+| `column` | integer | 1-based column number. For dotted expressions like `json.dumps()` or `os.path.join()`, point to the member token (`dumps`, `join`) when targeting the member definition. |
 
 ### Symbol Reference Parameters
 
@@ -108,12 +108,12 @@ Some tools support identifying the target element by fully qualified symbol refe
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `language` | string | Language of the symbol (e.g., `"Java"`). Required when using `symbol`. |
+| `language` | string | Language of the symbol (e.g., `"Java"`). Required when using `symbol`. Unsupported languages are rejected at runtime; use `file` + `line` + `column` for languages without symbol-reference support. |
 | `symbol` | string | Fully qualified symbol reference. Format: `com.example.ClassName`, `com.example.ClassName#memberName`. |
 
 **Important:** The two parameter groups are **mutually exclusive** — provide either `file` + `line` + `column` OR `language` + `symbol`, not both.
 
-**Supported languages:** Java (more languages planned).
+**Supported languages:** Java only today. Unsupported languages return an explicit error listing the currently supported symbol-reference languages.
 
 **Tools that support symbol references:** `ide_find_references`, `ide_find_definition`, `ide_call_hierarchy`, `ide_find_implementations`, `ide_find_super_methods`.
 
@@ -138,12 +138,15 @@ Finds all references to a symbol across the entire project using IntelliJ's sema
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `file` | string | Conditional | Path to the file relative to project root. Required for position-based lookup. |
+| `file` | string | Conditional | Project-relative file path, or a dependency/library absolute path or `jar://` URL previously returned by the plugin. Required for position-based lookup. |
 | `line` | integer | Conditional | 1-based line number. Required for position-based lookup. |
 | `column` | integer | Conditional | 1-based column number. Required for position-based lookup. |
 | `language` | string | Conditional | Language of the symbol (e.g., `"Java"`). Required for symbol-based lookup. |
 | `symbol` | string | Conditional | Fully qualified symbol reference. Required for symbol-based lookup. |
-| `maxResults` | integer | No | Maximum number of references to return (default: 100, max: 500) |
+| `scope` | string | No | Built-in search scope. One of `project_files` (default), `project_and_libraries`, `project_production_files`, `project_test_files` |
+| `maxResults` | integer | No | Deprecated alias for `pageSize` (default: 100, max: 500) |
+| `cursor` | string | No | Pagination cursor from a previous response |
+| `pageSize` | integer | No | Number of results per page (default: 100, max: 500) |
 
 **Example Request (position-based):**
 
@@ -170,7 +173,8 @@ Finds all references to a symbol across the entire project using IntelliJ's sema
     "name": "ide_find_references",
     "arguments": {
       "language": "Java",
-      "symbol": "com.example.UserService#findUser(String)"
+      "symbol": "com.example.UserService#findUser(String)",
+      "scope": "project_and_libraries"
     }
   }
 }
@@ -198,7 +202,14 @@ Finds all references to a symbol across the entire project using IntelliJ's sema
       "astPath": ["UserServiceTest", "testFindUser"]
     }
   ],
-  "totalCount": 2
+  "totalCount": 2,
+  "truncated": false,
+  "nextCursor": null,
+  "hasMore": false,
+  "totalCollected": 2,
+  "offset": 0,
+  "pageSize": 100,
+  "stale": false
 }
 ```
 
@@ -226,7 +237,7 @@ Finds the definition/declaration location of a symbol at a given source location
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `file` | string | Conditional | Path to the file relative to project root. Required for position-based lookup. |
+| `file` | string | Conditional | Project-relative file path, or a dependency/library absolute path or `jar://` URL previously returned by the plugin. Required for position-based lookup. |
 | `line` | integer | Conditional | 1-based line number. Required for position-based lookup. |
 | `column` | integer | Conditional | 1-based column number. Required for position-based lookup. |
 | `language` | string | Conditional | Language of the symbol (e.g., `"Java"`). Required for symbol-based lookup. |
@@ -277,6 +288,8 @@ Finds the definition/declaration location of a symbol at a given source location
 }
 ```
 
+**Path note:** Project results use relative paths. Dependency/library results may use absolute paths or `jar://` URLs.
+
 ---
 
 ### ide_find_class
@@ -298,10 +311,12 @@ Searches for classes and interfaces by name using the IDE's class index.
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `query` | string | Yes | Search pattern |
-| `includeLibraries` | boolean | No | Include classes from dependencies (default: false) |
+| `scope` | string | No | Built-in search scope. One of `project_files` (default), `project_and_libraries`, `project_production_files`, `project_test_files` |
 | `language` | string | No | Filter by language (e.g., `"Kotlin"`, `"Java"`, `"Python"`). Case-insensitive |
 | `matchMode` | string | No | `"substring"` (default), `"prefix"`, or `"exact"` |
-| `limit` | integer | No | Maximum results (default: 25, max: 100) |
+| `limit` | integer | No | Deprecated alias for `pageSize` (default: 25, max: 500) |
+| `cursor` | string | No | Pagination cursor from a previous response |
+| `pageSize` | integer | No | Number of results per page (default: 25, max: 500) |
 
 **Example Request:**
 
@@ -312,7 +327,8 @@ Searches for classes and interfaces by name using the IDE's class index.
     "name": "ide_find_class",
     "arguments": {
       "query": "UserService",
-      "language": "Kotlin"
+      "language": "Kotlin",
+      "scope": "project_files"
     }
   }
 }
@@ -337,6 +353,8 @@ Searches for classes and interfaces by name using the IDE's class index.
 }
 ```
 
+**Path note:** Project results use relative paths. Dependency/library results may use absolute paths or `jar://` URLs.
+
 ---
 
 ### ide_find_file
@@ -354,8 +372,10 @@ Searches for files by name using the IDE's file index.
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `query` | string | Yes | File name pattern |
-| `includeLibraries` | boolean | No | Include files from dependencies (default: false) |
-| `limit` | integer | No | Maximum results (default: 25, max: 100) |
+| `scope` | string | No | Built-in search scope. One of `project_files` (default), `project_and_libraries`, `project_production_files`, `project_test_files` |
+| `limit` | integer | No | Deprecated alias for `pageSize` (default: 25, max: 500) |
+| `cursor` | string | No | Pagination cursor from a previous response |
+| `pageSize` | integer | No | Number of results per page (default: 25, max: 500) |
 
 **Example Request:**
 
@@ -365,7 +385,8 @@ Searches for files by name using the IDE's file index.
   "params": {
     "name": "ide_find_file",
     "arguments": {
-      "query": "UserService"
+      "query": "UserService",
+      "scope": "project_and_libraries"
     }
   }
 }
@@ -386,6 +407,8 @@ Searches for files by name using the IDE's file index.
   "query": "UserService"
 }
 ```
+
+**Path note:** Project results use relative paths. Dependency/library results may use absolute paths or `jar://` URLs.
 
 ---
 
@@ -448,13 +471,20 @@ Searches for text using the IDE's pre-built word index. Significantly faster tha
 
 > **Availability**: Universal Tool - works in all JetBrains IDEs
 
-Analyzes a file for code problems (errors, warnings) and available intentions/quick fixes.
+Analyzes code diagnostics from three sources:
+- fresh per-file IDE analysis for problems (errors, warnings),
+- optional build output from the last build,
+- optional test results from open test run tabs.
+
+File problems are collected through explicit daemon analysis, so they do not depend on the target project window being active. Intentions/quick fixes are best-effort and require the file to already be open in an editor.
 
 **Use when:**
 - Finding code issues in a file
 - Checking code quality
 - Identifying potential bugs
 - Discovering available code improvements
+- Reading recent build errors without parsing console output
+- Inspecting failing tests from open test run tabs
 
 **Parameters:**
 
@@ -465,6 +495,12 @@ Analyzes a file for code problems (errors, warnings) and available intentions/qu
 | `column` | integer | No | 1-based column number for intention lookup (default: 1) |
 | `startLine` | integer | No | Filter problems to start from this line |
 | `endLine` | integer | No | Filter problems to end at this line |
+| `includeBuildErrors` | boolean | No | Include errors/warnings from the last build (default: `false`) |
+| `includeTestResults` | boolean | No | Include test results from open test run tabs (default: `false`) |
+| `severity` | string | No | Filter diagnostics by `all`, `errors`, or `warnings` (default: `all`) |
+| `testResultFilter` | string | No | Filter test results by `failed` or `all` (default: `failed`) |
+| `maxBuildErrors` | integer | No | Maximum build messages to return (default: 100, max: 500) |
+| `maxTestResults` | integer | No | Maximum test results to return (default: 100, max: 500) |
 
 **Example Request:**
 
@@ -486,38 +522,29 @@ Analyzes a file for code problems (errors, warnings) and available intentions/qu
 {
   "problems": [
     {
-      "message": "Field 'logger' can be made final",
-      "severity": "WARNING",
+      "message": "Cannot resolve symbol 'UnknownType'",
+      "severity": "ERROR",
       "file": "src/main/java/com/example/UserService.java",
-      "line": 8,
-      "column": 12,
-      "endLine": 8,
-      "endColumn": 18
-    },
-    {
-      "message": "Unused import 'java.util.Date'",
-      "severity": "WARNING",
-      "file": "src/main/java/com/example/UserService.java",
-      "line": 3,
-      "column": 1,
-      "endLine": 3,
-      "endColumn": 22
+      "line": 12,
+      "column": 9,
+      "endLine": 12,
+      "endColumn": 20
     }
   ],
-  "intentions": [
-    {
-      "name": "Add 'final' modifier",
-      "description": "Makes the field final"
-    },
-    {
-      "name": "Optimize imports",
-      "description": "Removes unused imports"
-    }
-  ],
-  "problemCount": 2,
-  "intentionCount": 2
+  "intentions": [],
+  "problemCount": 1,
+  "intentionCount": 0,
+  "analysisFresh": true,
+  "analysisTimedOut": false,
+  "analysisMessage": "Intentions are unavailable because the file is not open in an editor."
 }
 ```
+
+**Response Notes:**
+- `analysisFresh = true` means the file problems came from a fresh explicit IDE analysis pass instead of cached editor highlights.
+- `analysisTimedOut = true` means the file analysis budget was exceeded; build/test sections may still be returned.
+- `analysisMessage` explains degraded cases such as timeouts or missing live editor context for intentions.
+- `line` and `column` affect intention lookup only; file problems are collected for the whole file, then filtered by `startLine` / `endLine` if provided.
 
 **Severity Values:**
 - `ERROR` - Compilation error
@@ -1074,6 +1101,7 @@ Retrieves the complete type hierarchy for a class or interface.
 | `line` | integer | No* | 1-based line number |
 | `column` | integer | No* | 1-based column number |
 | `className` | string | No* | Fully qualified class name (alternative to position) |
+| `scope` | string | No | Built-in search scope. One of `project_files` (default), `project_and_libraries`, `project_production_files`, `project_test_files` |
 
 *Either `file`/`line`/`column` OR `className` must be provided.
 
@@ -1101,7 +1129,8 @@ Retrieves the complete type hierarchy for a class or interface.
   "params": {
     "name": "ide_type_hierarchy",
     "arguments": {
-      "className": "java.util.ArrayList"
+      "className": "java.util.ArrayList",
+      "scope": "project_and_libraries"
     }
   }
 }
@@ -1128,25 +1157,29 @@ Retrieves the complete type hierarchy for a class or interface.
   "element": {
     "name": "com.example.UserServiceImpl",
     "file": "src/main/java/com/example/UserServiceImpl.java",
-    "kind": "CLASS"
+    "kind": "CLASS",
+    "language": "Java"
   },
   "supertypes": [
     {
       "name": "com.example.UserService",
       "file": "src/main/java/com/example/UserService.java",
-      "kind": "INTERFACE"
+      "kind": "INTERFACE",
+      "language": "Java"
     },
     {
       "name": "com.example.BaseService",
       "file": "src/main/java/com/example/BaseService.java",
-      "kind": "ABSTRACT_CLASS"
+      "kind": "ABSTRACT_CLASS",
+      "language": "Java"
     }
   ],
   "subtypes": [
     {
       "name": "com.example.AdminUserServiceImpl",
       "file": "src/main/java/com/example/AdminUserServiceImpl.java",
-      "kind": "CLASS"
+      "kind": "CLASS",
+      "language": "Java"
     }
   ]
 }
@@ -1178,13 +1211,14 @@ Analyzes method call relationships to find callers or callees.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `file` | string | Conditional | Path to the file relative to project root. Required for position-based lookup. |
+| `file` | string | Conditional | Project-relative file path, or a dependency/library absolute path or `jar://` URL previously returned by the plugin. Required for position-based lookup. |
 | `line` | integer | Conditional | 1-based line number. Required for position-based lookup. |
 | `column` | integer | Conditional | 1-based column number. Required for position-based lookup. |
 | `language` | string | Conditional | Language of the symbol (e.g., `"Java"`). Required for symbol-based lookup. |
 | `symbol` | string | Conditional | Fully qualified symbol reference. Required for symbol-based lookup. |
 | `direction` | string | Yes | `"callers"` or `"callees"` |
 | `depth` | integer | No | How deep to traverse (default: 3, max: 5) |
+| `scope` | string | No | Built-in search scope. One of `project_files` (default), `project_and_libraries`, `project_production_files`, `project_test_files` |
 
 **Example Request (position-based):**
 
@@ -1213,7 +1247,8 @@ Analyzes method call relationships to find callers or callees.
     "arguments": {
       "language": "Java",
       "symbol": "com.example.UserService#validateUser(String)",
-      "direction": "callers"
+      "direction": "callers",
+      "scope": "project_and_libraries"
     }
   }
 }
@@ -1227,20 +1262,23 @@ Analyzes method call relationships to find callers or callees.
     "name": "UserService.validateUser(String)",
     "file": "src/main/java/com/example/UserService.java",
     "line": 20,
-    "column": 17
+    "column": 17,
+    "language": "Java"
   },
   "calls": [
     {
       "name": "UserController.createUser(UserRequest)",
       "file": "src/main/java/com/example/UserController.java",
       "line": 45,
-      "column": 17
+      "column": 17,
+      "language": "Java"
     },
     {
       "name": "UserController.updateUser(String, UserRequest)",
       "file": "src/main/java/com/example/UserController.java",
       "line": 62,
-      "column": 17
+      "column": 17,
+      "language": "Java"
     }
   ]
 }
@@ -1265,11 +1303,14 @@ Finds all concrete implementations of an interface, abstract class, or abstract 
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `file` | string | Conditional | Path to the file relative to project root. Required for position-based lookup. |
+| `file` | string | Conditional | Project-relative file path, or a dependency/library absolute path or `jar://` URL previously returned by the plugin. Required for position-based lookup. |
 | `line` | integer | Conditional | 1-based line number. Required for position-based lookup. |
 | `column` | integer | Conditional | 1-based column number. Required for position-based lookup. |
 | `language` | string | Conditional | Language of the symbol (e.g., `"Java"`). Required for symbol-based lookup. |
 | `symbol` | string | Conditional | Fully qualified symbol reference. Required for symbol-based lookup. |
+| `scope` | string | No | Built-in search scope. One of `project_files` (default), `project_and_libraries`, `project_production_files`, `project_test_files` |
+| `cursor` | string | No | Pagination cursor from a previous response |
+| `pageSize` | integer | No | Number of results per page (default: 100, max: 500) |
 
 **Example Request (position-based):**
 
@@ -1296,7 +1337,8 @@ Finds all concrete implementations of an interface, abstract class, or abstract 
     "name": "ide_find_implementations",
     "arguments": {
       "language": "Java",
-      "symbol": "com.example.Repository"
+      "symbol": "com.example.Repository",
+      "scope": "project_test_files"
     }
   }
 }
@@ -1322,7 +1364,13 @@ Finds all concrete implementations of an interface, abstract class, or abstract 
       "kind": "CLASS"
     }
   ],
-  "totalCount": 2
+  "totalCount": 2,
+  "nextCursor": null,
+  "hasMore": false,
+  "totalCollected": 2,
+  "offset": 0,
+  "pageSize": 100,
+  "stale": false
 }
 ```
 
@@ -1349,10 +1397,12 @@ Searches for code symbols (classes, interfaces, methods, fields) by name using t
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `query` | string | Yes | Search pattern (supports substring and camelCase matching) |
-| `includeLibraries` | boolean | No | Include symbols from library dependencies (default: false) |
+| `scope` | string | No | Built-in search scope. One of `project_files` (default), `project_and_libraries`, `project_production_files`, `project_test_files` |
 | `language` | string | No | Filter by language (e.g., `"Kotlin"`, `"Java"`). Case-insensitive |
 | `matchMode` | string | No | `"substring"` (default), `"prefix"`, or `"exact"` |
-| `limit` | integer | No | Maximum results to return (default: 25, max: 100) |
+| `limit` | integer | No | Deprecated alias for `pageSize` (default: 25, max: 500) |
+| `cursor` | string | No | Pagination cursor from a previous response |
+| `pageSize` | integer | No | Number of results per page (default: 25, max: 500) |
 
 **Example Request:**
 
@@ -1377,8 +1427,8 @@ Searches for code symbols (classes, interfaces, methods, fields) by name using t
     "name": "ide_find_symbol",
     "arguments": {
       "query": "USvc",
-      "includeLibraries": true,
-      "limit": 50
+      "scope": "project_and_libraries",
+      "pageSize": 50
     }
   }
 }
@@ -1422,6 +1472,8 @@ Searches for code symbols (classes, interfaces, methods, fields) by name using t
 }
 ```
 
+**Path note:** Project results use relative paths. Dependency/library results may use absolute paths or `jar://` URLs.
+
 **Kind Values:**
 - `CLASS` - Concrete class
 - `ABSTRACT_CLASS` - Abstract class
@@ -1454,7 +1506,7 @@ Finds the complete inheritance hierarchy for a method - all parent methods it ov
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `file` | string | Conditional | Path to the file relative to project root. Required for position-based lookup. |
+| `file` | string | Conditional | Project-relative file path, or a dependency/library absolute path or `jar://` URL previously returned by the plugin. Required for position-based lookup. |
 | `line` | integer | Conditional | 1-based line number (any line within the method). Required for position-based lookup. |
 | `column` | integer | Conditional | 1-based column number (any position within the method). Required for position-based lookup. |
 | `language` | string | Conditional | Language of the symbol (e.g., `"Java"`). Required for symbol-based lookup. |

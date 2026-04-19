@@ -2,6 +2,8 @@ package com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.navigation
 
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.constants.ParamNames
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.constants.ToolNames
+import com.github.hechtcarmel.jetbrainsindexmcpplugin.handlers.BuiltInSearchScope
+import com.github.hechtcarmel.jetbrainsindexmcpplugin.handlers.BuiltInSearchScopeResolver
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.handlers.LanguageHandlerRegistry
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.server.PaginationService
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.server.ProjectResolver
@@ -14,10 +16,14 @@ import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.project.Project
 import com.intellij.psi.util.PsiModificationTracker
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 
 /**
  * Tool for searching code symbols across multiple languages.
@@ -45,15 +51,15 @@ class FindSymbolTool : AbstractMcpTool() {
         Returns: matching symbols with qualified names, file paths, line/column numbers, and kind.
 
         Supports pagination: first call returns results + nextCursor. Pass cursor to get the next page.
-        Parameters: query (required for fresh search), includeLibraries (optional, default: false), pageSize (optional, default: 25, max: 500), cursor (for pagination, replaces search params; project_path may still be required).
+        Parameters: query (required for fresh search), scope (optional, default: "project_files"; supported: project_files, project_and_libraries, project_production_files, project_test_files), pageSize (optional, default: 25, max: 500), cursor (for pagination, replaces search params; project_path may still be required).
 
-        Example: {"query": "UserService"} or {"query": "find_user", "includeLibraries": true}
+        Example: {"query": "UserService"} or {"query": "find_user", "scope": "project_and_libraries"}
     """.trimIndent()
 
     override val inputSchema: JsonObject = SchemaBuilder.tool()
         .projectPath()
         .stringProperty(ParamNames.QUERY, "Search pattern. Supports substring and camelCase matching. Required for fresh search, ignored when cursor is provided.")
-        .booleanProperty(ParamNames.INCLUDE_LIBRARIES, "Include symbols from library dependencies. Default: false.")
+        .scopeProperty("Search scope. Default: project_files.")
         .stringProperty(ParamNames.LANGUAGE, "Filter results by language (e.g., \"Kotlin\", \"Java\", \"Python\"). Case-insensitive. Optional.")
         .enumProperty(ParamNames.MATCH_MODE, "How to match the query. Default: \"substring\".", listOf("substring", "prefix", "exact"))
         .intProperty(ParamNames.LIMIT, "Maximum results per page (deprecated, use pageSize). Default: $DEFAULT_PAGE_SIZE, max: $MAX_PAGE_SIZE.")
@@ -82,7 +88,14 @@ class FindSymbolTool : AbstractMcpTool() {
 
         val query = arguments[ParamNames.QUERY]?.jsonPrimitive?.content
             ?: return createErrorResult("Missing required parameter: ${ParamNames.QUERY}")
-        val includeLibraries = arguments[ParamNames.INCLUDE_LIBRARIES]?.jsonPrimitive?.boolean ?: false
+        val rawScope = rawScopeValue(arguments[ParamNames.SCOPE])
+        val scope = try {
+            BuiltInSearchScopeResolver.parse(arguments, BuiltInSearchScope.PROJECT_FILES)
+        } catch (_: IllegalArgumentException) {
+            return createInvalidScopeError(rawScope)
+        } catch (_: IllegalStateException) {
+            return createInvalidScopeError(rawScope)
+        }
         val languageFilter = arguments[ParamNames.LANGUAGE]?.jsonPrimitive?.content
         val matchMode = arguments[ParamNames.MATCH_MODE]?.jsonPrimitive?.content ?: "substring"
         val pageSize = resolvePageSize(arguments, DEFAULT_PAGE_SIZE, aliases = arrayOf("limit"))
@@ -106,7 +119,7 @@ class FindSymbolTool : AbstractMcpTool() {
             val allMatches = mutableListOf<SymbolMatch>()
 
             for (handler in handlers) {
-                val handlerResults = handler.searchSymbols(project, query, includeLibraries, collectLimit, matchMode)
+                val handlerResults = handler.searchSymbols(project, query, scope, collectLimit, matchMode)
                 for (symbolData in handlerResults) {
                     if (languageFilter != null && !symbolData.language.equals(languageFilter, ignoreCase = true)) continue
                     allMatches.add(SymbolMatch(
@@ -127,7 +140,7 @@ class FindSymbolTool : AbstractMcpTool() {
 
             val searchExtender: suspend (Set<String>, Int) -> List<PaginationService.SerializedResult> = { seenKeys, limit ->
                 suspendingReadAction {
-                    extendSearchSymbols(project, query, includeLibraries, matchMode, languageFilter, seenKeys, limit)
+                    extendSearchSymbols(project, query, scope, matchMode, languageFilter, seenKeys, limit)
                 }
             }
 
@@ -179,7 +192,7 @@ class FindSymbolTool : AbstractMcpTool() {
     private fun extendSearchSymbols(
         project: Project,
         query: String,
-        includeLibraries: Boolean,
+        scope: BuiltInSearchScope,
         matchMode: String,
         languageFilter: String?,
         seenKeys: Set<String>,
@@ -189,7 +202,7 @@ class FindSymbolTool : AbstractMcpTool() {
         val allMatches = mutableListOf<SymbolMatch>()
 
         for (handler in handlers) {
-            val handlerResults = handler.searchSymbols(project, query, includeLibraries, limit + seenKeys.size, matchMode)
+            val handlerResults = handler.searchSymbols(project, query, scope, limit + seenKeys.size, matchMode)
             for (symbolData in handlerResults) {
                 if (languageFilter != null && !symbolData.language.equals(languageFilter, ignoreCase = true)) continue
                 allMatches.add(SymbolMatch(
@@ -216,4 +229,20 @@ class FindSymbolTool : AbstractMcpTool() {
                 )
             }
     }
+
+    private fun rawScopeValue(scopeElement: JsonElement?): String = when (scopeElement) {
+        null -> ""
+        is JsonPrimitive -> scopeElement.content
+        else -> scopeElement.toString()
+    }
+
+    private fun createInvalidScopeError(provided: String): ToolCallResult =
+        createErrorResult(buildJsonObject {
+            put("error", JsonPrimitive("invalid_scope"))
+            put("parameter", JsonPrimitive(ParamNames.SCOPE))
+            put("provided", JsonPrimitive(provided))
+            put("supportedValues", buildJsonArray {
+                BuiltInSearchScope.supportedWireValues().forEach { add(JsonPrimitive(it)) }
+            })
+        }.toString())
 }

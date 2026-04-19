@@ -66,9 +66,10 @@ Omit `paths` to sync the entire project.
 ## Parameter Rules
 
 1. **Line and column are 1-based** (first line = 1, first column = 1)
-2. **File paths are relative** to project root (e.g., `src/main/java/App.java`, NOT absolute paths)
-3. **Column must point to the symbol name**, not whitespace or punctuation. For `public void myMethod()`, column should land on `m` of `myMethod`
+2. **Project file paths are relative** to project root (e.g., `src/main/java/App.java`, NOT absolute paths). If an IDE tool returns a dependency/library file, keep the returned absolute path or `jar://` URL unchanged when passing it back to read-only navigation tools or `ide_read_file`
+3. **Column must point to the symbol name**, not whitespace or punctuation. For `public void myMethod()`, column should land on `m` of `myMethod`. For dotted expressions like `json.dumps()` or `os.path.join()`, put the column on the member token (`dumps`, `join`) when you want the member definition rather than the module/package.
 4. **project_path is only needed** for multi-project workspaces. Omit for single-project setups. When needed, use the absolute path to the project root.
+5. **Use built-in search scope intentionally**: `ide_find_references`, `ide_find_implementations`, `ide_type_hierarchy`, `ide_call_hierarchy`, `ide_find_class`, `ide_find_file`, and `ide_find_symbol` accept `scope`. Use `project_files` for the default project-only view, `project_and_libraries` when dependency code matters, `project_production_files` to stay out of tests, and `project_test_files` when you want test-only results.
 
 ## Tool Selection by Task
 
@@ -114,13 +115,15 @@ Omit `paths` to sync the entire project.
 
 5. **Using 0-based line/column**: All IDE tools use **1-based**. Line 5 in file = `line: 5`.
 
-6. **Passing absolute file paths**: Use relative paths. `src/main/App.java`, not `/Users/me/project/src/main/App.java`.
+6. **Passing absolute project file paths**: Use relative paths for project files. `src/main/App.java`, not `/Users/me/project/src/main/App.java`.
 
-6. **Not syncing after external file changes**: After creating files via Write tool, call `ide_sync_files` before searching.
+7. **Rewriting plugin-returned library paths**: If a search or read tool returns an absolute path or `jar://` URL for a dependency/library file, pass that path back unchanged to read-only navigation tools or `ide_read_file`.
 
-7. **Using `ide_search_text` for regex**: This tool is exact-word only (uses word index). Use `Grep` for regex.
+8. **Not syncing after external file changes**: After creating files via Write tool, call `ide_sync_files` before searching.
 
-8. **Using `ide_find_class` for methods/functions**: It searches classes only. Use `ide_search_text` for a quick word lookup.
+9. **Using `ide_search_text` for regex**: This tool is exact-word only (uses word index). Use `Grep` for regex.
+
+10. **Using `ide_find_class` for methods/functions**: It searches classes only. Use `ide_search_text` for a quick word lookup.
 
 ## Disabled-by-Default Tools
 

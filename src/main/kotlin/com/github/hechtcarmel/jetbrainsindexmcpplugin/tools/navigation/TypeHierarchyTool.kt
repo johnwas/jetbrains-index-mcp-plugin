@@ -1,5 +1,8 @@
 package com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.navigation
 
+import com.github.hechtcarmel.jetbrainsindexmcpplugin.constants.ParamNames
+import com.github.hechtcarmel.jetbrainsindexmcpplugin.handlers.BuiltInSearchScope
+import com.github.hechtcarmel.jetbrainsindexmcpplugin.handlers.BuiltInSearchScopeResolver
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.handlers.LanguageHandlerRegistry
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.handlers.TypeElementData
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.server.models.ToolCallResult
@@ -11,8 +14,13 @@ import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.project.Project
 import com.intellij.psi.PsiElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 
 /**
  * Tool for retrieving type hierarchies across multiple languages.
@@ -34,9 +42,9 @@ class TypeHierarchyTool : AbstractMcpTool() {
 
         Returns: target class info, full supertype chain (recursive), and all subtypes in the project.
 
-        Parameters: Either className (e.g., "com.example.MyClass") OR file + line + column.
+        Parameters: Either className (e.g., "com.example.MyClass") OR file + line + column. scope (optional, default: "project_files"; supported: project_files, project_and_libraries, project_production_files, project_test_files).
 
-        Example: {"className": "com.example.UserService"} or {"file": "src/MyClass.java", "line": 10, "column": 14}
+        Example: {"className": "com.example.UserService", "scope": "project_and_libraries"} or {"file": "src/MyClass.java", "line": 10, "column": 14}
     """.trimIndent()
 
     override val inputSchema: JsonObject = SchemaBuilder.tool()
@@ -45,6 +53,7 @@ class TypeHierarchyTool : AbstractMcpTool() {
         .file(required = false, description = "Path to file relative to project root (e.g., 'src/main/java/com/example/MyClass.java'). Use with line and column.")
         .intProperty("line", "1-based line number where the class is defined. Required if using file parameter.")
         .intProperty("column", "1-based column number. Required if using file parameter.")
+        .scopeProperty("Search scope. Default: project_files.")
         .build()
 
     override suspend fun doExecute(project: Project, arguments: JsonObject): ToolCallResult {
@@ -52,7 +61,14 @@ class TypeHierarchyTool : AbstractMcpTool() {
 
         val className = arguments["className"]?.jsonPrimitive?.content
         val file = arguments["file"]?.jsonPrimitive?.content
-
+        val rawScope = rawScopeValue(arguments[ParamNames.SCOPE])
+        val scope = try {
+            BuiltInSearchScopeResolver.parse(arguments, BuiltInSearchScope.PROJECT_FILES)
+        } catch (_: IllegalArgumentException) {
+            return createInvalidScopeError(rawScope)
+        } catch (_: IllegalStateException) {
+            return createInvalidScopeError(rawScope)
+        }
         return suspendingReadAction {
             ProgressManager.checkCanceled() // Allow cancellation
 
@@ -77,7 +93,7 @@ class TypeHierarchyTool : AbstractMcpTool() {
 
             ProgressManager.checkCanceled() // Allow cancellation before heavy operation
 
-            val hierarchyData = handler.getTypeHierarchy(element, project)
+            val hierarchyData = handler.getTypeHierarchy(element, project, scope)
             if (hierarchyData == null) {
                 return@suspendingReadAction createErrorResult("No class/type found at the specified position.")
             }
@@ -90,6 +106,22 @@ class TypeHierarchyTool : AbstractMcpTool() {
             ))
         }
     }
+
+    private fun rawScopeValue(scopeElement: JsonElement?): String = when (scopeElement) {
+        null -> ""
+        is JsonPrimitive -> scopeElement.content
+        else -> scopeElement.toString()
+    }
+
+    private fun createInvalidScopeError(provided: String): ToolCallResult =
+        createErrorResult(buildJsonObject {
+            put("error", JsonPrimitive("invalid_scope"))
+            put("parameter", JsonPrimitive(ParamNames.SCOPE))
+            put("provided", JsonPrimitive(provided))
+            put("supportedValues", buildJsonArray {
+                BuiltInSearchScope.supportedWireValues().forEach { add(JsonPrimitive(it)) }
+            })
+        }.toString())
 
     private fun resolveTargetElement(project: Project, arguments: JsonObject): PsiElement? {
         // Try className first (Java/Kotlin specific)

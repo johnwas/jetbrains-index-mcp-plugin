@@ -1,8 +1,9 @@
 package com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.navigation
 
-import com.github.hechtcarmel.jetbrainsindexmcpplugin.handlers.createFilteredScope
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.constants.ParamNames
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.constants.ToolNames
+import com.github.hechtcarmel.jetbrainsindexmcpplugin.handlers.BuiltInSearchScope
+import com.github.hechtcarmel.jetbrainsindexmcpplugin.handlers.BuiltInSearchScopeResolver
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.server.PaginationService
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.server.ProjectResolver
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.server.models.ToolCallResult
@@ -10,6 +11,7 @@ import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.AbstractMcpTool
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.models.FileMatch
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.models.FindFileResult
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.schema.SchemaBuilder
+import com.github.hechtcarmel.jetbrainsindexmcpplugin.util.ProjectUtils
 import com.intellij.navigation.ChooseByNameContributor
 import com.intellij.navigation.ChooseByNameContributorEx
 import com.intellij.navigation.NavigationItem
@@ -24,10 +26,14 @@ import com.intellij.psi.search.GlobalSearchScope
 import com.intellij.psi.util.PsiModificationTracker
 import com.intellij.util.indexing.FindSymbolParameters
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 
 /**
  * Tool for searching files by name.
@@ -55,15 +61,15 @@ class FindFileTool : AbstractMcpTool() {
         Returns: matching files with name, path, and containing directory.
 
         Supports pagination: first call returns results + nextCursor. Pass cursor to get the next page.
-        Parameters: query (required for fresh search), includeLibraries (optional, default: false), pageSize (optional, default: 25, max: 500), cursor (for pagination, replaces search params; project_path may still be required).
+        Parameters: query (required for fresh search), scope (optional, default: "project_files"; supported: project_files, project_and_libraries, project_production_files, project_test_files), pageSize (optional, default: 25, max: 500), cursor (for pagination, replaces search params; project_path may still be required).
 
-        Example: {"query": "UserService.java"} or {"query": "*Test.kt"} or {"query": "BG"} (matches build.gradle)
+        Example: {"query": "UserService.java"} or {"query": "build.gradle"} or {"query": "BG"} (matches build.gradle)
     """.trimIndent()
 
     override val inputSchema: JsonObject = SchemaBuilder.tool()
         .projectPath()
         .stringProperty(ParamNames.QUERY, "File name pattern. Supports substring and fuzzy matching. Required for fresh search, ignored when cursor is provided.")
-        .booleanProperty(ParamNames.INCLUDE_LIBRARIES, "Include files from library dependencies. Default: false.")
+        .scopeProperty("Search scope. Default: project_files.")
         .intProperty(ParamNames.LIMIT, "Maximum results per page (deprecated, use pageSize). Default: $DEFAULT_PAGE_SIZE, max: $MAX_PAGE_SIZE.")
         .stringProperty("cursor", "Pagination cursor from a previous response. When provided, returns the next page of results. Search parameters are ignored; project_path and pageSize may still be provided.")
         .intProperty("pageSize", "Results per page. Default: $DEFAULT_PAGE_SIZE, max: $MAX_PAGE_SIZE.")
@@ -90,7 +96,14 @@ class FindFileTool : AbstractMcpTool() {
 
         val query = arguments[ParamNames.QUERY]?.jsonPrimitive?.content
             ?: return createErrorResult("Missing required parameter: ${ParamNames.QUERY}")
-        val includeLibraries = arguments[ParamNames.INCLUDE_LIBRARIES]?.jsonPrimitive?.boolean ?: false
+        val rawScope = rawScopeValue(arguments[ParamNames.SCOPE])
+        val scope = try {
+            BuiltInSearchScopeResolver.parse(arguments, BuiltInSearchScope.PROJECT_FILES)
+        } catch (_: IllegalArgumentException) {
+            return createInvalidScopeError(rawScope)
+        } catch (_: IllegalStateException) {
+            return createInvalidScopeError(rawScope)
+        }
         val pageSize = resolvePageSize(arguments, DEFAULT_PAGE_SIZE, aliases = arrayOf("limit"))
         val collectLimit = maxOf(PaginationService.DEFAULT_OVERCOLLECT, pageSize)
 
@@ -101,9 +114,9 @@ class FindFileTool : AbstractMcpTool() {
         requireSmartMode(project)
 
         val cursorToken = suspendingReadAction {
-            val scope = createFilteredScope(project, includeLibraries)
+            val searchScope = resolveSearchScope(project, scope)
             val matcher = createMatcher(query)
-            val files = searchFiles(project, query, scope, collectLimit, matcher)
+            val files = searchFiles(project, query, searchScope, scope, collectLimit, matcher)
 
             val sortedFiles = files
                 .distinctBy { it.path }
@@ -111,7 +124,7 @@ class FindFileTool : AbstractMcpTool() {
 
             val searchExtender: suspend (Set<String>, Int) -> List<PaginationService.SerializedResult> = { seenKeys, limit ->
                 suspendingReadAction {
-                    extendSearchFiles(project, query, includeLibraries, seenKeys, limit)
+                    extendSearchFiles(project, query, scope, seenKeys, limit)
                 }
             }
 
@@ -158,13 +171,13 @@ class FindFileTool : AbstractMcpTool() {
     private fun extendSearchFiles(
         project: Project,
         query: String,
-        includeLibraries: Boolean,
+        scope: BuiltInSearchScope,
         seenKeys: Set<String>,
         limit: Int
     ): List<PaginationService.SerializedResult> {
-        val scope = createFilteredScope(project, includeLibraries)
+        val searchScope = resolveSearchScope(project, scope)
         val matcher = createMatcher(query)
-        val files = searchFiles(project, query, scope, limit + seenKeys.size, matcher)
+        val files = searchFiles(project, query, searchScope, scope, limit + seenKeys.size, matcher)
 
         return files
             .distinctBy { it.path }
@@ -185,7 +198,8 @@ class FindFileTool : AbstractMcpTool() {
     private fun searchFiles(
         project: Project,
         pattern: String,
-        scope: GlobalSearchScope,
+        searchScope: GlobalSearchScope,
+        scope: BuiltInSearchScope,
         limit: Int,
         matcher: MinusculeMatcher
     ): List<FileMatch> {
@@ -199,7 +213,7 @@ class FindFileTool : AbstractMcpTool() {
             if (results.size >= limit) break
 
             try {
-                processContributor(contributor, project, pattern, scope, limit, matcher, results, seen)
+                processContributor(contributor, project, pattern, searchScope, scope, limit, matcher, results, seen)
             } catch (e: Exception) {
                 LOG.debug("Contributor ${contributor.javaClass.simpleName} failed for pattern '$pattern'", e)
             }
@@ -212,7 +226,8 @@ class FindFileTool : AbstractMcpTool() {
         contributor: ChooseByNameContributor,
         project: Project,
         pattern: String,
-        scope: GlobalSearchScope,
+        searchScope: GlobalSearchScope,
+        scope: BuiltInSearchScope,
         limit: Int,
         matcher: MinusculeMatcher,
         results: MutableList<FileMatch>,
@@ -229,20 +244,20 @@ class FindFileTool : AbstractMcpTool() {
                     }
                     matchingNames.size < limit * 3
                 },
-                scope,
+                searchScope,
                 null
             )
 
             for (name in matchingNames) {
                 if (results.size >= limit) break
 
-                val params = FindSymbolParameters.wrap(pattern, scope)
+                val params = FindSymbolParameters.wrap(pattern, searchScope)
                 contributor.processElementsWithName(
                     name,
                     { item ->
                         if (results.size >= limit) return@processElementsWithName false
 
-                        val fileMatch = convertToFileMatch(item, project)
+                        val fileMatch = convertToFileMatch(item, project, searchScope)
                         if (fileMatch != null) {
                             val key = fileMatch.path
                             if (key !in seen) {
@@ -257,17 +272,17 @@ class FindFileTool : AbstractMcpTool() {
             }
         } else {
             // Legacy API
-            val names = contributor.getNames(project, false)
+            val names = contributor.getNames(project, scope == BuiltInSearchScope.PROJECT_AND_LIBRARIES)
             val matchingNames = names.filter { matcher.matches(it) }
 
             for (name in matchingNames) {
                 if (results.size >= limit) break
 
-                val items = contributor.getItemsByName(name, pattern, project, false)
+                val items = contributor.getItemsByName(name, pattern, project, scope == BuiltInSearchScope.PROJECT_AND_LIBRARIES)
                 for (item in items) {
                     if (results.size >= limit) break
 
-                    val fileMatch = convertToFileMatch(item, project)
+                    val fileMatch = convertToFileMatch(item, project, searchScope)
                     if (fileMatch != null) {
                         val key = fileMatch.path
                         if (key !in seen) {
@@ -280,8 +295,42 @@ class FindFileTool : AbstractMcpTool() {
         }
     }
 
-    private fun convertToFileMatch(item: NavigationItem, project: Project): FileMatch? {
-        val virtualFile: VirtualFile = when (item) {
+    private fun resolveSearchScope(project: Project, scope: BuiltInSearchScope): GlobalSearchScope {
+        return BuiltInSearchScopeResolver.resolveGlobalScope(project, scope)
+    }
+
+    private fun rawScopeValue(scopeElement: JsonElement?): String = when (scopeElement) {
+        null -> ""
+        is JsonPrimitive -> scopeElement.content
+        else -> scopeElement.toString()
+    }
+
+    private fun createInvalidScopeError(provided: String): ToolCallResult =
+        createErrorResult(buildJsonObject {
+            put("error", JsonPrimitive("invalid_scope"))
+            put("parameter", JsonPrimitive(ParamNames.SCOPE))
+            put("provided", JsonPrimitive(provided))
+            put("supportedValues", buildJsonArray {
+                BuiltInSearchScope.supportedWireValues().forEach { add(JsonPrimitive(it)) }
+            })
+        }.toString())
+
+    private fun convertToFileMatch(item: NavigationItem, project: Project, scope: GlobalSearchScope): FileMatch? {
+        val virtualFile = extractVirtualFile(item) ?: return null
+        if (!scope.contains(virtualFile)) return null
+
+        val relativePath = ProjectUtils.getToolFilePath(project, virtualFile)
+        val directory = virtualFile.parent?.let { ProjectUtils.getToolFilePath(project, it) } ?: ""
+
+        return FileMatch(
+            name = virtualFile.name,
+            path = relativePath,
+            directory = directory
+        )
+    }
+
+    private fun extractVirtualFile(item: NavigationItem): VirtualFile? {
+        return when (item) {
             is PsiFile -> item.virtualFile
             else -> {
                 try {
@@ -296,17 +345,7 @@ class FindFileTool : AbstractMcpTool() {
                     null
                 }
             }
-        } ?: return null
-
-        val basePath = project.basePath ?: ""
-        val relativePath = virtualFile.path.removePrefix(basePath).removePrefix("/")
-        val directory = virtualFile.parent?.path?.removePrefix(basePath)?.removePrefix("/") ?: ""
-
-        return FileMatch(
-            name = virtualFile.name,
-            path = relativePath,
-            directory = directory
-        )
+        }
     }
 
     private fun createMatcher(pattern: String): MinusculeMatcher {

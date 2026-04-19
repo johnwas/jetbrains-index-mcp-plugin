@@ -2,6 +2,7 @@ package com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.schema
 
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.constants.ParamNames
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.constants.SchemaConstants
+import com.github.hechtcarmel.jetbrainsindexmcpplugin.handlers.BuiltInSearchScope
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.handlers.LanguageHandlerRegistry
 import io.mockk.every
 import io.mockk.mockkObject
@@ -67,6 +68,25 @@ class SchemaBuilderUnitTest : TestCase() {
         val enumValues = modeProp["enum"]?.jsonArray?.map { it.jsonPrimitive.content }!!
         assertEquals(3, enumValues.size)
         assertTrue(enumValues.contains("exact"))
+    }
+
+    fun testScopeProperty() {
+        val schema = SchemaBuilder.tool()
+            .projectPath()
+            .scopeProperty("Search scope. Default: project_files.")
+            .build()
+
+        val properties = schema[SchemaConstants.PROPERTIES]?.jsonObject!!
+        val scopeProp = properties[ParamNames.SCOPE]?.jsonObject!!
+        assertEquals(SchemaConstants.TYPE_STRING, scopeProp[SchemaConstants.TYPE]?.jsonPrimitive?.content)
+        assertEquals(
+            BuiltInSearchScope.supportedWireValues(),
+            scopeProp["enum"]?.jsonArray?.map { it.jsonPrimitive.content }
+        )
+        assertEquals(
+            "Search scope. Default: project_files.",
+            scopeProp[SchemaConstants.DESCRIPTION]?.jsonPrimitive?.content
+        )
     }
 
     fun testBooleanProperty() {
@@ -135,6 +155,10 @@ class SchemaBuilderUnitTest : TestCase() {
             val languageProp = properties[ParamNames.LANGUAGE]?.jsonObject!!
             val enumValues = languageProp["enum"]?.jsonArray?.map { it.jsonPrimitive.content }!!
             assertEquals(listOf("Java", "Kotlin"), enumValues)
+            assertTrue(
+                "language description should list supported languages",
+                languageProp[SchemaConstants.DESCRIPTION]?.jsonPrimitive?.content?.contains("Currently supported languages: Java, Kotlin.") == true
+            )
 
             val required = schema[SchemaConstants.REQUIRED]?.jsonArray?.map { it.jsonPrimitive.content }!!
             assertTrue("language should be required", required.contains(ParamNames.LANGUAGE))
@@ -157,6 +181,10 @@ class SchemaBuilderUnitTest : TestCase() {
             val properties = schema[SchemaConstants.PROPERTIES]?.jsonObject!!
             val languageProp = properties[ParamNames.LANGUAGE]?.jsonObject!!
             assertNull("enum should be absent when no handlers registered", languageProp["enum"])
+            assertTrue(
+                "language description should explain when symbol references are unavailable",
+                languageProp[SchemaConstants.DESCRIPTION]?.jsonPrimitive?.content?.contains("No symbol reference handlers are currently available.") == true
+            )
         } finally {
             unmockkObject(LanguageHandlerRegistry)
         }

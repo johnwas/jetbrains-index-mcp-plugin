@@ -6,6 +6,7 @@ import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.editor.OpenFileTool
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.intelligence.GetDiagnosticsTool
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.navigation.CallHierarchyTool
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.navigation.FileStructureTool
+import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.navigation.FindClassTool
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.navigation.FindImplementationsTool
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.navigation.FindSuperMethodsTool
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.navigation.FindUsagesTool
@@ -17,11 +18,30 @@ import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.refactoring.RenameSy
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.refactoring.SafeDeleteTool
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.constants.ErrorMessages
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.constants.SchemaConstants
+import com.github.hechtcarmel.jetbrainsindexmcpplugin.handlers.BuiltInSearchScope
+import com.github.hechtcarmel.jetbrainsindexmcpplugin.handlers.BuiltInSearchScopeResolver
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.handlers.LanguageHandlerRegistry
+import com.github.hechtcarmel.jetbrainsindexmcpplugin.handlers.OptimizedSymbolSearch
+import com.github.hechtcarmel.jetbrainsindexmcpplugin.handlers.SymbolData
+import com.github.hechtcarmel.jetbrainsindexmcpplugin.handlers.createMatcher
+import com.github.hechtcarmel.jetbrainsindexmcpplugin.handlers.createNameFilter
+import com.intellij.navigation.ChooseByNameContributor
+import com.intellij.navigation.NavigationItem
+import com.intellij.openapi.roots.ModuleRootModificationUtil
+import com.intellij.openapi.vfs.LocalFileSystem
+import com.intellij.psi.PsiClass
+import com.intellij.psi.PsiManager
+import com.intellij.psi.codeStyle.MinusculeMatcher
+import com.intellij.psi.search.GlobalSearchScope
+import com.intellij.testFramework.IndexingTestUtil
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
+import java.nio.file.Files
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
@@ -304,6 +324,118 @@ class ToolsTest : BasePlatformTestCase() {
 
         assertTrue("Should error with unsupported language", result.isError)
         assertTrue("Should mention unsupported language", errorText(result).contains("Cobol"))
+    }
+
+    fun testFindClassToolInvalidScopeReturnsStructuredError() = runBlocking {
+        val tool = FindClassTool()
+
+        val result = tool.execute(project, buildJsonObject {
+            put("query", "UserService")
+            put("scope", "totally_invalid")
+        })
+
+        assertTrue("Should error with invalid scope", result.isError)
+
+        val errorJson = json.parseToJsonElement(errorText(result)).jsonObject
+        assertEquals("invalid_scope", errorJson["error"]?.jsonPrimitive?.content)
+        assertEquals("scope", errorJson["parameter"]?.jsonPrimitive?.content)
+        assertEquals("totally_invalid", errorJson["provided"]?.jsonPrimitive?.content)
+        assertEquals(
+            listOf("project_files", "project_and_libraries", "project_production_files", "project_test_files"),
+            errorJson["supportedValues"]?.jsonArray?.map { it.jsonPrimitive.content }
+        )
+    }
+
+    fun testFindClassToolMalformedScopeTypeReturnsStructuredError() = runBlocking {
+        val tool = FindClassTool()
+
+        val result = tool.execute(project, buildJsonObject {
+            put("query", "UserService")
+            put("scope", buildJsonArray {
+                add(JsonPrimitive("project_files"))
+            })
+        })
+
+        assertTrue("Should error with malformed scope type", result.isError)
+
+        val errorJson = json.parseToJsonElement(errorText(result)).jsonObject
+        assertEquals("invalid_scope", errorJson["error"]?.jsonPrimitive?.content)
+        assertEquals("scope", errorJson["parameter"]?.jsonPrimitive?.content)
+        assertEquals("[\"project_files\"]", errorJson["provided"]?.jsonPrimitive?.content)
+        assertEquals(
+            listOf("project_files", "project_and_libraries", "project_production_files", "project_test_files"),
+            errorJson["supportedValues"]?.jsonArray?.map { it.jsonPrimitive.content }
+        )
+    }
+
+    fun testOptimizedSymbolSearchLegacyContributorHonorsProjectFilesScope() {
+        val projectFile = myFixture.addFileToProject(
+            "legacy/ProjectScopeSymbol.java",
+            """
+            package legacy;
+
+            public class ProjectScopeSymbol {}
+            """.trimIndent()
+        )
+
+        val libraryRoot = Files.createTempDirectory("legacy-contributor-lib")
+        val libraryPackageDir = Files.createDirectories(libraryRoot.resolve("legacy"))
+        val libraryPath = libraryPackageDir.resolve("LibraryScopeSymbol.java")
+        Files.writeString(
+            libraryPath,
+            """
+            package legacy;
+
+            public class LibraryScopeSymbol {}
+            """.trimIndent()
+        )
+
+        val libraryRootVFile = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(libraryRoot)
+        val libraryFileVFile = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(libraryPath)
+        assertNotNull("Expected library root in temp dir", libraryRootVFile)
+        assertNotNull("Expected library file in temp dir", libraryFileVFile)
+
+        ModuleRootModificationUtil.addModuleLibrary(
+            module,
+            "legacy-contributor-library",
+            emptyList(),
+            listOf(libraryRootVFile!!.url)
+        )
+        IndexingTestUtil.waitUntilIndexesAreReady(project)
+
+        val libraryFile = PsiManager.getInstance(project).findFile(libraryFileVFile!!)
+        assertNotNull("Expected library PSI file", libraryFile)
+
+        val projectSymbol = projectFile.children.filterIsInstance<PsiClass>().firstOrNull { it.name == "ProjectScopeSymbol" }
+        val librarySymbol = libraryFile!!.children.filterIsInstance<PsiClass>().firstOrNull { it.name == "LibraryScopeSymbol" }
+        assertNotNull("Expected project symbol", projectSymbol)
+        assertNotNull("Expected library symbol", librarySymbol)
+
+        val contributor = LegacyContributor(
+            mapOf(
+                "ProjectScopeSymbol" to arrayOf<NavigationItem>(projectSymbol!!),
+                "LibraryScopeSymbol" to arrayOf<NavigationItem>(librarySymbol!!)
+            )
+        )
+        val scope = BuiltInSearchScopeResolver.resolveGlobalScope(project, BuiltInSearchScope.PROJECT_FILES)
+        assertTrue("Project file should be inside project_files scope", scope.contains(projectFile.virtualFile))
+        assertFalse("Library file should be outside project_files scope", scope.contains(libraryFile.virtualFile))
+        val matcher = createMatcher("ScopeSymbol", "substring")
+        val results = mutableListOf<SymbolData>()
+        val seen = mutableSetOf<String>()
+
+        invokeLegacySymbolContributor(
+            contributor = contributor,
+            pattern = "ScopeSymbol",
+            scope = scope,
+            languageFilter = null,
+            nameFilter = { true },
+            matcher = matcher,
+            results = results,
+            seen = seen
+        )
+
+        assertEquals(listOf("ProjectScopeSymbol"), results.map { it.name })
     }
 
     // Intelligence Tools Tests
@@ -611,5 +743,48 @@ class ToolsTest : BasePlatformTestCase() {
             assertNotNull("Definition should have inputSchema", definition.inputSchema)
             assertEquals(SchemaConstants.TYPE_OBJECT, definition.inputSchema[SchemaConstants.TYPE]?.jsonPrimitive?.content)
         }
+    }
+
+    private fun invokeLegacySymbolContributor(
+        contributor: ChooseByNameContributor,
+        pattern: String,
+        scope: GlobalSearchScope,
+        languageFilter: Set<String>?,
+        nameFilter: (String) -> Boolean,
+        matcher: MinusculeMatcher,
+        results: MutableList<SymbolData>,
+        seen: MutableSet<String>
+    ) {
+        val method = OptimizedSymbolSearch::class.java.declaredMethods.first {
+            it.name == "processContributor" && it.parameterCount == 10
+        }
+        method.isAccessible = true
+        method.invoke(
+            OptimizedSymbolSearch,
+            contributor,
+            project,
+            pattern,
+            scope,
+            10,
+            languageFilter,
+            nameFilter,
+            matcher,
+            results,
+            seen
+        )
+    }
+
+    class LegacyContributor(
+        private val itemsByName: Map<String, Array<NavigationItem>>
+    ) : ChooseByNameContributor {
+        override fun getNames(project: com.intellij.openapi.project.Project, includeNonProjectItems: Boolean): Array<String> =
+            itemsByName.keys.toTypedArray()
+
+        override fun getItemsByName(
+            name: String,
+            pattern: String,
+            project: com.intellij.openapi.project.Project,
+            includeNonProjectItems: Boolean
+        ): Array<NavigationItem> = itemsByName[name] ?: emptyArray()
     }
 }

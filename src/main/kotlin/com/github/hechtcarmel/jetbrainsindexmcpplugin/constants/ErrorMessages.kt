@@ -28,8 +28,14 @@ object ErrorMessages {
         "Missing required parameter: $param (required when using symbol)"
     fun missingParamForPosition(param: String, others: String) =
         "Missing required parameter: $param (required when using $others)"
-    fun noSymbolReferenceHandler(language: String, supported: List<String>) =
-        "No symbol reference handler available for language: $language. Supported languages: ${supported.joinToString(", ")}"
+    fun noSymbolReferenceHandler(language: String, supported: List<String>): String {
+        val supportedList = supported.distinct().sorted()
+        return if (supportedList.isEmpty()) {
+            "Unsupported language for symbol references: $language. No symbol reference handlers are available in this IDE session. Use file+line+column instead."
+        } else {
+            "Unsupported language for symbol references: $language. Use file+line+column instead. Currently supported languages: ${supportedList.joinToString(", ")}"
+        }
+    }
     fun invalidSymbolFormat(symbol: String, examples: List<String>) =
         "Symbol '$symbol' does not match expected format. Examples: ${examples.joinToString(", ")}"
     fun typeNotFound(typeFqn: String, projectName: String) =

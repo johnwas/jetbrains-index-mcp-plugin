@@ -47,7 +47,8 @@ object PsiUtils {
         val reference = element.reference
         if (reference != null) {
             val resolved = reference.resolve()
-            if (resolved != null) return resolved
+            val refined = PythonDefinitionResolver.refineResolvedTarget(element, resolved)
+            if (refined != null) return refined
         }
 
         // Walk up parent chain looking for references (handles cases where
@@ -55,8 +56,11 @@ object PsiUtils {
         val parentReference = findReferenceInParent(element)
         if (parentReference != null) {
             val resolved = parentReference.resolve()
-            if (resolved != null) return resolved
+            val refined = PythonDefinitionResolver.refineResolvedTarget(element, resolved)
+            if (refined != null) return refined
         }
+
+        PythonDefinitionResolver.refineResolvedTarget(element, null)?.let { return it }
 
         // Fallback: if we're ON a declaration (not a reference), find it syntactically
         return findNamedElement(element)
@@ -157,11 +161,43 @@ object PsiUtils {
         return getVirtualFile(project, normalizedPath)
     }
 
+    fun resolveNavigableVirtualFile(project: Project, path: String): VirtualFile? {
+        // Match resolveVirtualFileAnywhere() semantics for path normalization.
+        val normalizedPath = if (SystemInfo.isWindows) path.replace('\\', '/') else path
+        val virtualFileManager = VirtualFileManager.getInstance()
+        val rootCandidates = sequence {
+            project.basePath?.let { yield(it) }
+            for (root in ProjectUtils.getModuleContentRoots(project)) {
+                yield(root)
+            }
+        }
+
+        val resolved = when {
+            normalizedPath.startsWith("jar://") -> virtualFileManager.findFileByUrl(normalizedPath)
+            normalizedPath.contains(".jar!/") -> {
+                val parts = normalizedPath.split("!/", limit = 2)
+                if (parts.size != 2) {
+                    null
+                } else {
+                    val jarPath = parts[0]
+                    val internalPath = parts[1]
+                    val homeExpandedJarPath = expandHome(jarPath)
+                    val absoluteJarPath = resolveAbsolutePathString(homeExpandedJarPath, rootCandidates)
+                        ?: homeExpandedJarPath
+                    virtualFileManager.findFileByUrl("jar://$absoluteJarPath!/$internalPath")
+                }
+            }
+            else -> resolveLocalFile(normalizedPath, rootCandidates)
+        } ?: return null
+
+        return resolved.takeIf { ProjectUtils.isAccessibleFile(project, it) }
+    }
+
     fun resolveLocalFile(path: String, rootCandidates: Sequence<String>): VirtualFile? {
         val expandedPath = expandHome(path)
         // resolveAbsolutePath handles both absolute paths and relative paths against each root candidate.
         val absolutePath = resolveAbsolutePath(expandedPath, rootCandidates) ?: return null
-        return LocalFileSystem.getInstance().refreshAndFindFileByNioFile(absolutePath)
+        return LocalFileSystem.getInstance().findFileByNioFile(absolutePath)
     }
 
     fun resolveAbsolutePath(path: String, rootCandidates: Sequence<String> = emptySequence()): Path? {

@@ -2,7 +2,8 @@ package com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.navigation
 
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.handlers.createMatcher
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.handlers.createNameFilter
-import com.github.hechtcarmel.jetbrainsindexmcpplugin.handlers.createFilteredScope
+import com.github.hechtcarmel.jetbrainsindexmcpplugin.handlers.BuiltInSearchScope
+import com.github.hechtcarmel.jetbrainsindexmcpplugin.handlers.BuiltInSearchScopeResolver
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.constants.ParamNames
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.constants.ToolNames
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.server.PaginationService
@@ -12,6 +13,7 @@ import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.AbstractMcpTool
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.models.FindClassResult
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.models.SymbolMatch
 import com.github.hechtcarmel.jetbrainsindexmcpplugin.tools.schema.SchemaBuilder
+import com.github.hechtcarmel.jetbrainsindexmcpplugin.util.ProjectUtils
 import com.intellij.navigation.ChooseByNameContributor
 import com.intellij.navigation.ChooseByNameContributorEx
 import com.intellij.navigation.NavigationItem
@@ -27,10 +29,14 @@ import com.intellij.psi.search.GlobalSearchScope
 import com.intellij.psi.util.PsiModificationTracker
 import com.intellij.util.indexing.FindSymbolParameters
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 
 /**
  * Tool for searching classes and interfaces by name.
@@ -63,15 +69,15 @@ class FindClassTool : AbstractMcpTool() {
         Returns: matching classes with qualified names, file paths, line numbers, and kind (class/interface/enum).
 
         Supports pagination: first call returns results + nextCursor. Pass cursor to get the next page.
-        Parameters: query (required for fresh search), includeLibraries (optional, default: false), pageSize (optional, default: 25, max: 500), cursor (for pagination, replaces search params; project_path may still be required).
+        Parameters: query (required for fresh search), scope (optional, default: "project_files"; supported: project_files, project_and_libraries, project_production_files, project_test_files), pageSize (optional, default: 25, max: 500), cursor (for pagination, replaces search params; project_path may still be required).
 
-        Example: {"query": "UserService"} or {"query": "U*Impl"} or {"query": "USvc", "includeLibraries": true}
+        Example: {"query": "UserService"} or {"query": "U*Impl"} or {"query": "USvc", "scope": "project_and_libraries"}
     """.trimIndent()
 
     override val inputSchema: JsonObject = SchemaBuilder.tool()
         .projectPath()
         .stringProperty(ParamNames.QUERY, "Search pattern. Supports substring and camelCase matching. Required for fresh search, ignored when cursor is provided.")
-        .booleanProperty(ParamNames.INCLUDE_LIBRARIES, "Include classes from library dependencies. Default: false.")
+        .scopeProperty("Search scope. Default: project_files.")
         .stringProperty(ParamNames.LANGUAGE, "Filter results by language (e.g., \"Kotlin\", \"Java\", \"Python\"). Case-insensitive. Optional.")
         .enumProperty(ParamNames.MATCH_MODE, "How to match the query. Default: \"substring\".", listOf("substring", "prefix", "exact"))
         .intProperty(ParamNames.LIMIT, "Maximum results per page (deprecated, use pageSize). Default: $DEFAULT_PAGE_SIZE, max: $MAX_PAGE_SIZE.")
@@ -100,7 +106,14 @@ class FindClassTool : AbstractMcpTool() {
 
         val query = arguments[ParamNames.QUERY]?.jsonPrimitive?.content
             ?: return createErrorResult("Missing required parameter: ${ParamNames.QUERY}")
-        val includeLibraries = arguments[ParamNames.INCLUDE_LIBRARIES]?.jsonPrimitive?.boolean ?: false
+        val rawScope = rawScopeValue(arguments[ParamNames.SCOPE])
+        val scope = try {
+            BuiltInSearchScopeResolver.parse(arguments, BuiltInSearchScope.PROJECT_FILES)
+        } catch (_: IllegalArgumentException) {
+            return createInvalidScopeError(rawScope)
+        } catch (_: IllegalStateException) {
+            return createInvalidScopeError(rawScope)
+        }
         val languageFilter = arguments[ParamNames.LANGUAGE]?.jsonPrimitive?.content
         val matchMode = arguments[ParamNames.MATCH_MODE]?.jsonPrimitive?.content ?: "substring"
         val pageSize = resolvePageSize(arguments, DEFAULT_PAGE_SIZE, aliases = arrayOf("limit"))
@@ -113,11 +126,11 @@ class FindClassTool : AbstractMcpTool() {
         requireSmartMode(project)
 
         val cursorToken = suspendingReadAction {
-            val scope = createFilteredScope(project, includeLibraries)
+            val searchScope = resolveSearchScope(project, scope)
 
             val matcher = createMatcher(query, matchMode)
             val nameFilter = createNameFilter(query, matchMode, matcher)
-            val classes = searchClasses(project, query, scope, collectLimit, nameFilter, matcher, languageFilter)
+            val classes = searchClasses(project, query, searchScope, scope, collectLimit, nameFilter, matcher, languageFilter)
 
             val sortedClasses = classes
                 .distinctBy { "${it.file}:${it.line}:${it.column}:${it.name}" }
@@ -125,7 +138,7 @@ class FindClassTool : AbstractMcpTool() {
 
             val searchExtender: suspend (Set<String>, Int) -> List<PaginationService.SerializedResult> = { seenKeys, limit ->
                 suspendingReadAction {
-                    extendSearchClasses(project, query, includeLibraries, matchMode, languageFilter, seenKeys, limit)
+                    extendSearchClasses(project, query, scope, matchMode, languageFilter, seenKeys, limit)
                 }
             }
 
@@ -172,16 +185,16 @@ class FindClassTool : AbstractMcpTool() {
     private fun extendSearchClasses(
         project: Project,
         query: String,
-        includeLibraries: Boolean,
+        scope: BuiltInSearchScope,
         matchMode: String,
         languageFilter: String?,
         seenKeys: Set<String>,
         limit: Int
     ): List<PaginationService.SerializedResult> {
-        val scope = createFilteredScope(project, includeLibraries)
+        val searchScope = resolveSearchScope(project, scope)
         val matcher = createMatcher(query, matchMode)
         val nameFilter = createNameFilter(query, matchMode, matcher)
-        val classes = searchClasses(project, query, scope, limit + seenKeys.size, nameFilter, matcher, languageFilter)
+        val classes = searchClasses(project, query, searchScope, scope, limit + seenKeys.size, nameFilter, matcher, languageFilter)
 
         return classes
             .distinctBy { "${it.file}:${it.line}:${it.column}:${it.name}" }
@@ -202,7 +215,8 @@ class FindClassTool : AbstractMcpTool() {
     private fun searchClasses(
         project: Project,
         pattern: String,
-        scope: GlobalSearchScope,
+        searchScope: GlobalSearchScope,
+        scope: BuiltInSearchScope,
         limit: Int,
         nameFilter: (String) -> Boolean,
         matcher: MinusculeMatcher,
@@ -218,7 +232,7 @@ class FindClassTool : AbstractMcpTool() {
             if (results.size >= limit) break
 
             try {
-                processContributor(contributor, project, pattern, scope, limit, nameFilter, matcher, results, seen, languageFilter)
+                processContributor(contributor, project, pattern, searchScope, scope, limit, nameFilter, matcher, results, seen, languageFilter)
             } catch (e: Exception) {
                 LOG.debug("Contributor ${contributor.javaClass.simpleName} failed for pattern '$pattern'", e)
             }
@@ -231,7 +245,8 @@ class FindClassTool : AbstractMcpTool() {
         contributor: ChooseByNameContributor,
         project: Project,
         pattern: String,
-        scope: GlobalSearchScope,
+        searchScope: GlobalSearchScope,
+        scope: BuiltInSearchScope,
         limit: Int,
         nameFilter: (String) -> Boolean,
         matcher: MinusculeMatcher,
@@ -250,20 +265,20 @@ class FindClassTool : AbstractMcpTool() {
                     }
                     matchingNames.size < MAX_NAME_COLLECTION_LIMIT
                 },
-                scope,
+                searchScope,
                 null
             )
 
             for (name in matchingNames) {
                 if (results.size >= limit) break
 
-                val params = FindSymbolParameters.wrap(pattern, scope)
+                val params = FindSymbolParameters.wrap(pattern, searchScope)
                 contributor.processElementsWithName(
                     name,
                     { item ->
                         if (results.size >= limit) return@processElementsWithName false
 
-                        val symbolMatch = convertToSymbolMatch(item, project)
+                        val symbolMatch = convertToSymbolMatch(item, project, searchScope)
                         if (symbolMatch != null &&
                             (languageFilter == null || symbolMatch.language.equals(languageFilter, ignoreCase = true))) {
                             val key = "${symbolMatch.file}:${symbolMatch.line}:${symbolMatch.column}:${symbolMatch.name}"
@@ -279,17 +294,17 @@ class FindClassTool : AbstractMcpTool() {
             }
         } else {
             // Legacy API
-            val names = contributor.getNames(project, true)
+            val names = contributor.getNames(project, scope == BuiltInSearchScope.PROJECT_AND_LIBRARIES)
             val matchingNames = names.filter { nameFilter(it) }
 
             for (name in matchingNames) {
                 if (results.size >= limit) break
 
-                val items = contributor.getItemsByName(name, pattern, project, true)
+                val items = contributor.getItemsByName(name, pattern, project, scope == BuiltInSearchScope.PROJECT_AND_LIBRARIES)
                 for (item in items) {
                     if (results.size >= limit) break
 
-                    val symbolMatch = convertToSymbolMatch(item, project)
+                    val symbolMatch = convertToSymbolMatch(item, project, searchScope)
                     if (symbolMatch != null &&
                         (languageFilter == null || symbolMatch.language.equals(languageFilter, ignoreCase = true))) {
                         val key = "${symbolMatch.file}:${symbolMatch.line}:${symbolMatch.column}:${symbolMatch.name}"
@@ -303,23 +318,33 @@ class FindClassTool : AbstractMcpTool() {
         }
     }
 
-    private fun convertToSymbolMatch(item: NavigationItem, project: Project): SymbolMatch? {
-        val element = when (item) {
-            is PsiElement -> item
-            else -> {
-                try {
-                    val method = item.javaClass.getMethod("getElement")
-                    method.invoke(item) as? PsiElement
-                } catch (_: Exception) {
-                    null
-                }
-            }
-        } ?: return null
+    private fun resolveSearchScope(project: Project, scope: BuiltInSearchScope): GlobalSearchScope {
+        return BuiltInSearchScopeResolver.resolveGlobalScope(project, scope)
+    }
+
+    private fun rawScopeValue(scopeElement: JsonElement?): String = when (scopeElement) {
+        null -> ""
+        is JsonPrimitive -> scopeElement.content
+        else -> scopeElement.toString()
+    }
+
+    private fun createInvalidScopeError(provided: String): ToolCallResult =
+        createErrorResult(buildJsonObject {
+            put("error", JsonPrimitive("invalid_scope"))
+            put("parameter", JsonPrimitive(ParamNames.SCOPE))
+            put("provided", JsonPrimitive(provided))
+            put("supportedValues", buildJsonArray {
+                BuiltInSearchScope.supportedWireValues().forEach { add(JsonPrimitive(it)) }
+            })
+        }.toString())
+
+    private fun convertToSymbolMatch(item: NavigationItem, project: Project, scope: GlobalSearchScope): SymbolMatch? {
+        val element = extractPsiElement(item) ?: return null
         val targetElement = element.navigationElement ?: element
 
         val file = targetElement.containingFile?.virtualFile ?: return null
-        val basePath = project.basePath ?: ""
-        val relativePath = file.path.removePrefix(basePath).removePrefix("/")
+        if (!scope.contains(file)) return null
+        val relativePath = ProjectUtils.getToolFilePath(project, file)
 
         val name = when (targetElement) {
             is PsiNamedElement -> targetElement.name
@@ -355,6 +380,21 @@ class FindClassTool : AbstractMcpTool() {
             language = language
         )
     }
+
+    private fun extractPsiElement(item: NavigationItem): PsiElement? {
+        return when (item) {
+            is PsiElement -> item
+            else -> {
+                try {
+                    val method = item.javaClass.getMethod("getElement")
+                    method.invoke(item) as? PsiElement
+                } catch (_: Exception) {
+                    null
+                }
+            }
+        }
+    }
+
 
     private fun getLineNumber(project: Project, element: PsiElement): Int? {
         val psiFile = element.containingFile ?: return null

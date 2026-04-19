@@ -1,6 +1,7 @@
 package com.github.hechtcarmel.jetbrainsindexmcpplugin.util
 
 import com.intellij.openapi.module.ModuleManager
+import com.intellij.openapi.roots.ProjectFileIndex
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.roots.ModuleRootManager
 import com.intellij.openapi.vfs.LocalFileSystem
@@ -44,12 +45,42 @@ object ProjectUtils {
     }
 
     fun isProjectFile(project: Project, virtualFile: VirtualFile): Boolean {
+        try {
+            val fileIndex = ProjectFileIndex.getInstance(project)
+            if (fileIndex.isInContent(virtualFile)) return true
+        } catch (_: Exception) {
+            // Fall back to path-based checks below when file index is unavailable.
+        }
+
         val basePath = project.basePath ?: return false
         val filePath = virtualFile.path
         if (filePath == basePath || filePath.startsWith("$basePath/")) return true
 
         // Also check module content roots for workspace sub-projects
         return findMatchingContentRoot(project, filePath) != null
+    }
+
+    fun isDependencyFile(project: Project, virtualFile: VirtualFile): Boolean {
+        return try {
+            val fileIndex = ProjectFileIndex.getInstance(project)
+            fileIndex.isInLibrary(virtualFile) ||
+                fileIndex.isInLibraryClasses(virtualFile) ||
+                fileIndex.isInLibrarySource(virtualFile)
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    fun isAccessibleFile(project: Project, virtualFile: VirtualFile): Boolean {
+        return isProjectFile(project, virtualFile) || isDependencyFile(project, virtualFile)
+    }
+
+    fun getToolFilePath(project: Project, virtualFile: VirtualFile): String {
+        return when {
+            isProjectFile(project, virtualFile) -> getRelativePath(project, virtualFile)
+            virtualFile.fileSystem.protocol == "jar" -> virtualFile.url
+            else -> virtualFile.path
+        }
     }
 
     /**

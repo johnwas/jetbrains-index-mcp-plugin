@@ -1,5 +1,6 @@
 package com.github.hechtcarmel.jetbrainsindexmcpplugin.handlers
 
+import com.github.hechtcarmel.jetbrainsindexmcpplugin.util.ProjectUtils
 import com.intellij.navigation.ChooseByNameContributor
 import com.intellij.navigation.ChooseByNameContributorEx
 import com.intellij.navigation.NavigationItem
@@ -145,7 +146,7 @@ object OptimizedSymbolSearch {
                     { item ->
                         if (results.size >= limit) return@processElementsWithName false
 
-                        val symbolData = convertToSymbolData(item, project, languageFilter)
+                        val symbolData = convertToSymbolData(item, project, scope, languageFilter)
                         if (symbolData != null) {
                             val key = "${symbolData.file}:${symbolData.line}:${symbolData.column}:${symbolData.name}"
                             if (key !in seen) {
@@ -170,7 +171,7 @@ object OptimizedSymbolSearch {
                 for (item in items) {
                     if (results.size >= limit) break
 
-                    val symbolData = convertToSymbolData(item, project, languageFilter)
+                    val symbolData = convertToSymbolData(item, project, scope, languageFilter)
                     if (symbolData != null) {
                         val key = "${symbolData.file}:${symbolData.line}:${symbolData.column}:${symbolData.name}"
                         if (key !in seen) {
@@ -189,6 +190,7 @@ object OptimizedSymbolSearch {
     private fun convertToSymbolData(
         item: NavigationItem,
         project: Project,
+        scope: GlobalSearchScope,
         languageFilter: Set<String>?
     ): SymbolData? {
         val element = when (item) {
@@ -213,10 +215,8 @@ object OptimizedSymbolSearch {
         }
 
         val file = targetElement.containingFile?.virtualFile ?: return null
-        val basePath = project.basePath ?: ""
-        val relativePath = file.path.removePrefix(basePath).removePrefix("/")
-
-        if (isExcludedPath(relativePath)) return null
+        if (!scope.contains(file)) return null
+        val relativePath = ProjectUtils.getToolFilePath(project, file)
 
         val name = when (targetElement) {
             is PsiNamedElement -> targetElement.name

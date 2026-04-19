@@ -121,11 +121,11 @@ class ConstantsUnitTest : TestCase() {
     fun testParamNamesNavigation() {
         assertEquals("className", ParamNames.CLASS_NAME)
         assertEquals("direction", ParamNames.DIRECTION)
+        assertEquals("scope", ParamNames.SCOPE)
     }
 
     fun testParamNamesSymbolSearch() {
         assertEquals("query", ParamNames.QUERY)
-        assertEquals("includeLibraries", ParamNames.INCLUDE_LIBRARIES)
         assertEquals("limit", ParamNames.LIMIT)
     }
 
@@ -175,6 +175,20 @@ class ConstantsUnitTest : TestCase() {
         assertTrue(ErrorMessages.MISSING_PARAMS.contains("params"))
         assertTrue(ErrorMessages.MISSING_TOOL_NAME.contains("tool"))
         assertTrue(ErrorMessages.MISSING_RESOURCE_URI.contains("URI"))
+    }
+
+    fun testNoSymbolReferenceHandlerWithSupportedLanguages() {
+        val message = ErrorMessages.noSymbolReferenceHandler("Python", listOf("Java", "Kotlin", "Java"))
+        assertTrue(message.contains("Unsupported language for symbol references: Python"))
+        assertTrue(message.contains("Use file+line+column instead"))
+        assertTrue(message.contains("Currently supported languages: Java, Kotlin"))
+    }
+
+    fun testNoSymbolReferenceHandlerWithoutSupportedLanguages() {
+        val message = ErrorMessages.noSymbolReferenceHandler("Python", emptyList())
+        assertTrue(message.contains("Unsupported language for symbol references: Python"))
+        assertTrue(message.contains("No symbol reference handlers are available in this IDE session"))
+        assertTrue(message.contains("Use file+line+column instead"))
     }
 
     // SchemaConstants tests

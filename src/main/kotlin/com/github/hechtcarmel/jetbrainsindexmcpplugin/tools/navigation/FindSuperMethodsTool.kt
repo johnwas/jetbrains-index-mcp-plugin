@@ -35,7 +35,7 @@ class FindSuperMethodsTool : AbstractMcpTool() {
 
         Target (mutually exclusive):
         - file + line + column: position-based lookup (position can be anywhere within the method body)
-        - language + symbol: fully qualified symbol reference
+        - language + symbol: fully qualified symbol reference (currently supported for Java only)
 
         Example: {"file": "src/UserServiceImpl.java", "line": 25, "column": 10}
         Example: {"language": "Java", "symbol": "com.example.UserServiceImpl#getUser(String)"}
@@ -43,7 +43,7 @@ class FindSuperMethodsTool : AbstractMcpTool() {
 
     override val inputSchema: JsonObject = SchemaBuilder.tool()
         .projectPath()
-        .file(required = false)
+        .file(required = false, description = "Project-relative file path, or a dependency/library absolute path or jar:// URL previously returned by the plugin. Required for position-based lookup.")
         .lineAndColumn(required = false)
         .languageAndSymbol(required = false)
         .build()
@@ -52,7 +52,7 @@ class FindSuperMethodsTool : AbstractMcpTool() {
         requireSmartMode(project)
 
         return suspendingReadAction {
-            val element = resolveElementFromArguments(project, arguments).getOrElse {
+            val element = resolveElementFromArguments(project, arguments, allowLibraryFilesForPosition = true).getOrElse {
                 return@suspendingReadAction createErrorResult(it.message ?: ErrorMessages.COULD_NOT_RESOLVE_SYMBOL)
             }
 
