@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+## [4.13.1] - 2026-04-21
+### Fixed
+- Moving files now works more reliably, especially in PHP projects.
+
 ## [4.13.0] - 2026-04-18
 ### Changed
 - **Breaking: covered navigation and adjacent search tools now use built-in `scope` instead of `includeLibraries` / `includeTests`** — `ide_find_references`, `ide_find_implementations`, `ide_call_hierarchy`, `ide_type_hierarchy`, `ide_find_class`, `ide_find_file`, and `ide_find_symbol` now accept `scope` with the built-in values `project_files`, `project_and_libraries`, `project_production_files`, and `project_test_files`. The old boolean parameters are no longer part of the public contract.

@@ -815,7 +815,7 @@ class ToolsUnitTest : TestCase() {
         assertNotNull("Should have project_path property", properties?.get(ParamNames.PROJECT_PATH))
         assertNotNull("Should have file property", properties?.get(ParamNames.FILE))
         assertNotNull("Should have destination property", properties?.get(ParamNames.DESTINATION))
-        assertNotNull("Should have update_references property", properties?.get(ParamNames.UPDATE_REFERENCES))
+        assertNull("Should not expose update_references anymore", properties?.get("update_references"))
 
         val required = schema[SchemaConstants.REQUIRED]
         assertNotNull("Should have required array", required)

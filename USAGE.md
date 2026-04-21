@@ -25,7 +25,7 @@ These tools work in **every** JetBrains IDE:
 | `ide_get_active_file` | Get currently active editor file(s) | Disabled |
 | `ide_open_file` | Open file in editor with navigation | Disabled |
 | `ide_refactor_rename` | Rename symbol with reference updates (all languages) | Enabled |
-| `ide_move_file` | Move file to new directory with reference updates (all languages) | Enabled |
+| `ide_move_file` | Move file to new directory with IDE-aware move semantics | Enabled |
 | `ide_reformat_code` | Reformat code using project code style | Disabled |
 
 ### Extended Tools (Language-Aware)
@@ -950,21 +950,22 @@ All renames happen in a single atomic operation, so one undo (Ctrl/Cmd+Z) revert
 
 ### ide_move_file
 
-Move a file to a new directory using the IDE's refactoring engine. Automatically updates all references, imports, and package declarations across the project.
+Move a file to a new directory using the IDE's refactoring engine. Applies language-aware reference, import, and namespace/package updates when the IDE provides a semantic move backend for that file type.
 
-**Supported Languages:** Java, Kotlin, Python, JavaScript, TypeScript, Go, PHP, Rust, and any language with IntelliJ plugin support.
+**Supported Languages:** All project file types for literal file moves. Semantic updates depend on the active JetBrains language plugin. Java, Kotlin, and Python are known to provide file-move semantics; PHP class files are routed through PhpStorm's higher-level semantic move flow when available.
 
 **Features:**
-- Updates all imports and references across the entire project
-- Updates package declarations (Java/Kotlin)
+- Uses the IDE's file move refactoring for literal file relocation
+- Applies semantic namespace/package/import updates when the language plugin supports them
+- Routes PHP class-file moves through PhpStorm's semantic move dispatcher instead of the plain file-move backend
 - Automatically creates destination directory if it doesn't exist
 - Detects name conflicts at the destination
-- Optional reference search toggle for non-code files
+- Fails fast for ambiguous PHP semantic moves instead of reporting a false success
 
 **Use when:**
 - Reorganizing project structure
-- Moving classes to different packages
-- Relocating files while maintaining correct imports
+- Moving classes to different packages or namespaces when the IDE supports a semantic backend
+- Relocating files while preserving IDE-managed references when available
 
 **Parameters:**
 
@@ -972,7 +973,6 @@ Move a file to a new directory using the IDE's refactoring engine. Automatically
 |-----------|------|----------|-------------|
 | `file` | string | Yes | Path to the source file to move, relative to project root |
 | `destination` | string | Yes | Target directory path relative to project root |
-| `update_references` | boolean | No | Whether to update references (default: `true`) |
 
 **Example Request:**
 
@@ -989,7 +989,7 @@ Move a file to a new directory using the IDE's refactoring engine. Automatically
 }
 ```
 
-**Example Request (skip reference updates):**
+**Example Request (config file):**
 
 ```json
 {
@@ -998,8 +998,7 @@ Move a file to a new directory using the IDE's refactoring engine. Automatically
     "name": "ide_move_file",
     "arguments": {
       "file": "config/old-config.yml",
-      "destination": "config/archive",
-      "update_references": false
+      "destination": "config/archive"
     }
   }
 }
@@ -1015,7 +1014,7 @@ Move a file to a new directory using the IDE's refactoring engine. Automatically
     "src/main/java/com/new/services/MyService.java"
   ],
   "changesCount": 2,
-  "message": "Successfully moved 'src/main/java/com/old/MyService.java' to 'src/main/java/com/new/services/MyService.java' (references updated)"
+  "message": "Successfully moved 'src/main/java/com/old/MyService.java' to 'src/main/java/com/new/services/MyService.java' using IDE file move semantics"
 }
 ```
 

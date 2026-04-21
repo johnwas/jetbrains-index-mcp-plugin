@@ -270,13 +270,12 @@ Rename a symbol and update ALL references (semantic rename, not find-replace). W
 **Supports IDE undo** (Ctrl+Z).
 
 ### ide_move_file
-Move a file to a new directory, updating all references, imports, and package declarations. Works across ALL languages.
+Move a file to a new directory. Applies language-aware reference, import, and package/namespace updates only when the IDE provides a semantic move backend for that file type.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `file` | string | yes | Relative path of file to move |
 | `destination` | string | yes | Target directory (relative to project root, created if needed) |
-| `update_references` | boolean | no | Update references (default true) |
 | `project_path` | string | no | Project root path |
 
 **Returns**: `{ success, affectedFiles: [paths], changesCount, message }`
