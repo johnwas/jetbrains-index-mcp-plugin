@@ -4,6 +4,37 @@
 
 ## [Unreleased]
 
+## [4.16.0] - 2026-04-24
+### Fixed
+- **`ide_find_symbol` ordering, missing/extra results, and qualified-query handling now match IntelliJ's Go to Symbol popup.** The tool previously ran the popup search separately for each registered language handler and concatenated results in handler-iteration order, which destroyed cross-language ranking. Symbol search now issues a single popup-backed call.
+
+### Added
+- **`ide_find_symbol` is now available in every compatible JetBrains IDE**, including RubyMine, CLion, DataGrip, Aqua, and DataSpell. Result quality depends on IDE-supplied `ChooseByNameContributor` extensions; `kind` and `qualifiedName` may fall back to generic values for languages the plugin doesn't special-case.
+
+### Changed
+- Internal: removed the `SymbolSearchHandler` interface and its nine language implementations (including the Markdown symbol-search handler added in 4.15.0); symbol search is now centralised in `OptimizedSymbolSearch` + `PopupFaithfulSymbolSearch`. Markdown heading navigation remains available through `ide_file_structure`, not `ide_find_symbol`.
+
+## [4.15.0] - 2026-04-24
+### Added
+- Added Markdown heading support for `ide_find_symbol` and `ide_file_structure`, backed by the bundled JetBrains Markdown PSI/indexes. Fixes [#149](https://github.com/hechtcarmel/jetbrains-index-mcp-plugin/issues/149).
+
+## [4.14.1] - 2026-04-22
+### Fixed
+- Reworked `ide_diagnostics` to use Marketplace-safe public IntelliJ APIs instead of internal highlighting APIs, resolving the JetBrains Marketplace internal API rejection.
+- Preserved fresh diagnostics for open editor files while falling back to public batch analysis for closed files, with updated tool messaging that explains the weaker closed-file `WEAK_WARNING` and intention coverage.
+
+## [4.14.0] - 2026-04-21
+### Added
+- Added a settings toggle to return structured MCP tool payloads as either JSON or TOON.
+
+## [4.13.2] - 2026-04-21
+### Fixed
+- **Qualified symbol search in `ide_find_symbol` now behaves much closer to IntelliJ's Go to Symbol popup** — queries like `BasicSolver.run` and `test.BasicSolver.run` now resolve the intended symbol instead of being treated like a plain symbol name. Fixes [#144](https://github.com/hechtcarmel/jetbrains-index-mcp-plugin/issues/144).
+
+## [4.13.1] - 2026-04-21
+### Fixed
+- Moving files now works more reliably, especially in PHP projects.
+
 ## [4.13.0] - 2026-04-18
 ### Changed
 - **Breaking: covered navigation and adjacent search tools now use built-in `scope` instead of `includeLibraries` / `includeTests`** — `ide_find_references`, `ide_find_implementations`, `ide_call_hierarchy`, `ide_type_hierarchy`, `ide_find_class`, `ide_find_file`, and `ide_find_symbol` now accept `scope` with the built-in values `project_files`, `project_and_libraries`, `project_production_files`, and `project_test_files`. The old boolean parameters are no longer part of the public contract.

@@ -6,9 +6,9 @@ This document provides detailed documentation for all MCP tools available in the
 
 Tools are organized into categories based on IDE compatibility:
 
-### Universal Tools (All JetBrains IDEs)
+### Universal Tools (All Supported JetBrains IDEs)
 
-These tools work in **every** JetBrains IDE:
+These tools work in every supported JetBrains IDE:
 
 | Tool | Description | Default |
 |------|-------------|---------|
@@ -16,6 +16,7 @@ These tools work in **every** JetBrains IDE:
 | `ide_find_definition` | Find symbol definition location | Enabled |
 | `ide_find_class` | Search classes/interfaces by name | Enabled |
 | `ide_find_file` | Search files by name | Enabled |
+| `ide_find_symbol` | Search code symbols by name *(disabled by default)* | Disabled |
 | `ide_search_text` | Text search using word index | Enabled |
 | `ide_diagnostics` | Analyze file problems with fresh IDE diagnostics, plus optional build/test results | Enabled |
 | `ide_index_status` | Check indexing status | Enabled |
@@ -25,7 +26,7 @@ These tools work in **every** JetBrains IDE:
 | `ide_get_active_file` | Get currently active editor file(s) | Disabled |
 | `ide_open_file` | Open file in editor with navigation | Disabled |
 | `ide_refactor_rename` | Rename symbol with reference updates (all languages) | Enabled |
-| `ide_move_file` | Move file to new directory with reference updates (all languages) | Enabled |
+| `ide_move_file` | Move file to new directory with IDE-aware move semantics | Enabled |
 | `ide_reformat_code` | Reformat code using project code style | Disabled |
 
 ### Extended Tools (Language-Aware)
@@ -37,9 +38,8 @@ These tools activate based on available language plugins:
 | `ide_type_hierarchy` | Get type inheritance hierarchy | Java, Kotlin, Python, JS/TS, Go, PHP, Rust |
 | `ide_call_hierarchy` | Analyze method call relationships | Java, Kotlin, Python, JS/TS, Go, PHP, Rust |
 | `ide_find_implementations` | Find interface implementations | Java, Kotlin, Python, JS/TS, PHP, Rust |
-| `ide_find_symbol` | Search symbols by name *(disabled by default)* | Java, Kotlin, Python, JS/TS, Go, PHP, Rust |
 | `ide_find_super_methods` | Find overridden methods | Java, Kotlin, Python, JS/TS, PHP |
-| `ide_file_structure` | Hierarchical file structure *(disabled by default)* | Java, Kotlin, Python, JS/TS |
+| `ide_file_structure` | Hierarchical file structure *(disabled by default)* | Java, Kotlin, Python, JS/TS, Markdown |
 
 ### Java-Specific Refactoring Tools
 
@@ -59,6 +59,7 @@ These tools activate based on available language plugins:
   - [ide_find_class](#ide_find_class)
   - [ide_find_file](#ide_find_file)
   - [ide_search_text](#ide_search_text)
+  - [ide_find_symbol](#ide_find_symbol)
   - [ide_diagnostics](#ide_diagnostics)
   - [ide_index_status](#ide_index_status)
   - [ide_sync_files](#ide_sync_files)
@@ -74,7 +75,6 @@ These tools activate based on available language plugins:
   - [ide_type_hierarchy](#ide_type_hierarchy)
   - [ide_call_hierarchy](#ide_call_hierarchy)
   - [ide_find_implementations](#ide_find_implementations)
-  - [ide_find_symbol](#ide_find_symbol)
   - [ide_find_super_methods](#ide_find_super_methods)
   - [ide_file_structure](#ide_file_structure)
 - [Java-Specific Refactoring Tools](#java-specific-refactoring-tools)
@@ -836,6 +836,120 @@ Open a file in the IDE editor with optional line/column navigation.
 
 ---
 
+### ide_find_symbol
+
+> **Default**: Disabled - enable in Settings > Tools > Index MCP Server
+
+Searches for code symbols (classes, interfaces, methods, fields, and functions) by name using the IDE's semantic index and IntelliJ's Go to Symbol matching.
+
+**Use when:**
+- Finding a class or interface by name (e.g., find "UserService")
+- Locating methods across the codebase (e.g., find all "findById" methods)
+- Discovering fields or constants by name
+- Navigating to code when you know the symbol name but not the file location
+
+**Supports Go to Symbol matching:**
+- Substring: "Service" matches "UserService", "OrderService"
+- CamelCase: "USvc" matches "UserService", "US" matches "UserService"
+- Qualified queries: "BasicSolver.run" matches a method in its containing class or module
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `query` | string | Yes | Search pattern. Matching follows IntelliJ's Go to Symbol popup. |
+| `scope` | string | No | Built-in search scope. One of `project_files` (default), `project_and_libraries`, `project_production_files`, `project_test_files` |
+| `language` | string | No | Filter by language (e.g., `"Kotlin"`, `"Java"`). Case-insensitive |
+| `limit` | integer | No | Deprecated alias for `pageSize` (default: 25, max: 500) |
+| `cursor` | string | No | Pagination cursor from a previous response |
+| `pageSize` | integer | No | Number of results per page (default: 25, max: 500) |
+
+**Example Request:**
+
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "ide_find_symbol",
+    "arguments": {
+      "query": "UserService"
+    }
+  }
+}
+```
+
+**Example Request (camelCase matching):**
+
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "ide_find_symbol",
+    "arguments": {
+      "query": "USvc",
+      "scope": "project_and_libraries",
+      "pageSize": 50
+    }
+  }
+}
+```
+
+**Example Response:**
+
+```json
+{
+  "symbols": [
+    {
+      "name": "UserService",
+      "qualifiedName": "com.example.service.UserService",
+      "kind": "INTERFACE",
+      "file": "src/main/java/com/example/service/UserService.java",
+      "line": 12,
+      "column": 18,
+      "containerName": null
+    },
+    {
+      "name": "UserServiceImpl",
+      "qualifiedName": "com.example.service.UserServiceImpl",
+      "kind": "CLASS",
+      "file": "src/main/java/com/example/service/UserServiceImpl.java",
+      "line": 15,
+      "column": 14,
+      "containerName": null
+    },
+    {
+      "name": "findUser",
+      "qualifiedName": "com.example.service.UserService.findUser",
+      "kind": "METHOD",
+      "file": "src/main/java/com/example/service/UserService.java",
+      "line": 18,
+      "column": 10,
+      "containerName": "UserService"
+    }
+  ],
+  "totalCount": 3,
+  "query": "UserService"
+}
+```
+
+**Path note:** Project results use relative paths. Dependency/library results may use absolute paths or `jar://` URLs.
+
+**Kind Values:**
+- `CLASS` - Concrete class
+- `ABSTRACT_CLASS` - Abstract class
+- `INTERFACE` - Interface
+- `ENUM` - Enum type
+- `ANNOTATION` - Annotation type
+- `RECORD` - Record class (Java 16+)
+- `METHOD` - Method
+- `FIELD` - Field or constant
+- `FUNCTION` - Function
+- `SYMBOL` - Generic symbol when the IDE contributor does not expose a more specific kind
+
+For Markdown heading outlines, use `ide_file_structure`.
+
+---
+
 ## Refactoring Tools
 
 > **Note**: All refactoring tools modify source files. Changes can be undone with Ctrl/Cmd+Z.
@@ -950,21 +1064,22 @@ All renames happen in a single atomic operation, so one undo (Ctrl/Cmd+Z) revert
 
 ### ide_move_file
 
-Move a file to a new directory using the IDE's refactoring engine. Automatically updates all references, imports, and package declarations across the project.
+Move a file to a new directory using the IDE's refactoring engine. Applies language-aware reference, import, and namespace/package updates when the IDE provides a semantic move backend for that file type.
 
-**Supported Languages:** Java, Kotlin, Python, JavaScript, TypeScript, Go, PHP, Rust, and any language with IntelliJ plugin support.
+**Supported Languages:** All project file types for literal file moves. Semantic updates depend on the active JetBrains language plugin. Java, Kotlin, and Python are known to provide file-move semantics; PHP class files are routed through PhpStorm's higher-level semantic move flow when available.
 
 **Features:**
-- Updates all imports and references across the entire project
-- Updates package declarations (Java/Kotlin)
+- Uses the IDE's file move refactoring for literal file relocation
+- Applies semantic namespace/package/import updates when the language plugin supports them
+- Routes PHP class-file moves through PhpStorm's semantic move dispatcher instead of the plain file-move backend
 - Automatically creates destination directory if it doesn't exist
 - Detects name conflicts at the destination
-- Optional reference search toggle for non-code files
+- Fails fast for ambiguous PHP semantic moves instead of reporting a false success
 
 **Use when:**
 - Reorganizing project structure
-- Moving classes to different packages
-- Relocating files while maintaining correct imports
+- Moving classes to different packages or namespaces when the IDE supports a semantic backend
+- Relocating files while preserving IDE-managed references when available
 
 **Parameters:**
 
@@ -972,7 +1087,6 @@ Move a file to a new directory using the IDE's refactoring engine. Automatically
 |-----------|------|----------|-------------|
 | `file` | string | Yes | Path to the source file to move, relative to project root |
 | `destination` | string | Yes | Target directory path relative to project root |
-| `update_references` | boolean | No | Whether to update references (default: `true`) |
 
 **Example Request:**
 
@@ -989,7 +1103,7 @@ Move a file to a new directory using the IDE's refactoring engine. Automatically
 }
 ```
 
-**Example Request (skip reference updates):**
+**Example Request (config file):**
 
 ```json
 {
@@ -998,8 +1112,7 @@ Move a file to a new directory using the IDE's refactoring engine. Automatically
     "name": "ide_move_file",
     "arguments": {
       "file": "config/old-config.yml",
-      "destination": "config/archive",
-      "update_references": false
+      "destination": "config/archive"
     }
   }
 }
@@ -1015,7 +1128,7 @@ Move a file to a new directory using the IDE's refactoring engine. Automatically
     "src/main/java/com/new/services/MyService.java"
   ],
   "changesCount": 2,
-  "message": "Successfully moved 'src/main/java/com/old/MyService.java' to 'src/main/java/com/new/services/MyService.java' (references updated)"
+  "message": "Successfully moved 'src/main/java/com/old/MyService.java' to 'src/main/java/com/new/services/MyService.java' using IDE file move semantics"
 }
 ```
 
@@ -1080,8 +1193,9 @@ These tools activate based on available language plugins:
 - **Go** - GoLand, IntelliJ Ultimate with Go plugin
 - **PHP** - PhpStorm, IntelliJ Ultimate with PHP plugin
 - **Rust** - RustRover, IntelliJ Ultimate with Rust plugin, CLion
+- **Markdown** - heading outlines in file structure for IDEs with the bundled Markdown plugin
 
-In IDEs without language-specific plugins (e.g., DataGrip), these tools will not appear in the tools list.
+Navigation tools appear according to installed language plugins. Markdown file structure can appear even in IDEs without a code-language handler when the bundled Markdown plugin is enabled.
 
 ### ide_type_hierarchy
 
@@ -1376,116 +1490,6 @@ Finds all concrete implementations of an interface, abstract class, or abstract 
 
 ---
 
-### ide_find_symbol
-
-> **Default**: Disabled - enable in Settings > Tools > Index MCP Server
-
-Searches for code symbols (classes, interfaces, methods, fields) by name using the IDE's semantic index.
-
-**Use when:**
-- Finding a class or interface by name (e.g., find "UserService")
-- Locating methods across the codebase (e.g., find all "findById" methods)
-- Discovering fields or constants by name
-- Navigating to code when you know the symbol name but not the file location
-
-**Supports fuzzy matching:**
-- Substring: "Service" matches "UserService", "OrderService"
-- CamelCase: "USvc" matches "UserService", "US" matches "UserService"
-
-**Parameters:**
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `query` | string | Yes | Search pattern (supports substring and camelCase matching) |
-| `scope` | string | No | Built-in search scope. One of `project_files` (default), `project_and_libraries`, `project_production_files`, `project_test_files` |
-| `language` | string | No | Filter by language (e.g., `"Kotlin"`, `"Java"`). Case-insensitive |
-| `matchMode` | string | No | `"substring"` (default), `"prefix"`, or `"exact"` |
-| `limit` | integer | No | Deprecated alias for `pageSize` (default: 25, max: 500) |
-| `cursor` | string | No | Pagination cursor from a previous response |
-| `pageSize` | integer | No | Number of results per page (default: 25, max: 500) |
-
-**Example Request:**
-
-```json
-{
-  "method": "tools/call",
-  "params": {
-    "name": "ide_find_symbol",
-    "arguments": {
-      "query": "UserService"
-    }
-  }
-}
-```
-
-**Example Request (camelCase matching):**
-
-```json
-{
-  "method": "tools/call",
-  "params": {
-    "name": "ide_find_symbol",
-    "arguments": {
-      "query": "USvc",
-      "scope": "project_and_libraries",
-      "pageSize": 50
-    }
-  }
-}
-```
-
-**Example Response:**
-
-```json
-{
-  "symbols": [
-    {
-      "name": "UserService",
-      "qualifiedName": "com.example.service.UserService",
-      "kind": "INTERFACE",
-      "file": "src/main/java/com/example/service/UserService.java",
-      "line": 12,
-      "column": 18,
-      "containerName": null
-    },
-    {
-      "name": "UserServiceImpl",
-      "qualifiedName": "com.example.service.UserServiceImpl",
-      "kind": "CLASS",
-      "file": "src/main/java/com/example/service/UserServiceImpl.java",
-      "line": 15,
-      "column": 14,
-      "containerName": null
-    },
-    {
-      "name": "findUser",
-      "qualifiedName": "com.example.service.UserService.findUser",
-      "kind": "METHOD",
-      "file": "src/main/java/com/example/service/UserService.java",
-      "line": 18,
-      "column": 10,
-      "containerName": "UserService"
-    }
-  ],
-  "totalCount": 3,
-  "query": "UserService"
-}
-```
-
-**Path note:** Project results use relative paths. Dependency/library results may use absolute paths or `jar://` URLs.
-
-**Kind Values:**
-- `CLASS` - Concrete class
-- `ABSTRACT_CLASS` - Abstract class
-- `INTERFACE` - Interface
-- `ENUM` - Enum type
-- `ANNOTATION` - Annotation type
-- `RECORD` - Record class (Java 16+)
-- `METHOD` - Method
-- `FIELD` - Field or constant
-
----
-
 ### ide_find_super_methods
 
 Finds the complete inheritance hierarchy for a method - all parent methods it overrides or implements.
@@ -1601,10 +1605,10 @@ Finds the complete inheritance hierarchy for a method - all parent methods it ov
 
 Get the hierarchical structure of a source file, similar to the IDE's Structure view (<kbd>Cmd+7</kbd> / <kbd>Alt+7</kbd>).
 
-**Languages:** Java, Kotlin, Python, JavaScript, TypeScript.
+**Languages:** Java, Kotlin, Python, JavaScript, TypeScript, Markdown.
 
 **Use when:**
-- Getting an overview of a file's classes, methods, and fields
+- Getting an overview of a file's classes, methods, fields, or Markdown heading outline
 - Understanding code organization without reading the full file
 - Navigating large files
 

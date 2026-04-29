@@ -530,6 +530,34 @@ class ToolsTest : BasePlatformTestCase() {
         assertTrue("Should error with invalid file", result.isError)
     }
 
+    fun testMarkdownStructureHandlerBuildsHeadingHierarchy() {
+        val psiFile = myFixture.addFileToProject(
+            "docs/guide.md",
+            """
+            # Starter Pack
+            Intro text.
+            ## Installation
+            Install steps.
+            ### CLI Setup
+            CLI details.
+            ## Usage
+            Usage details.
+            """.trimIndent()
+        )
+        val handler = LanguageHandlerRegistry.getStructureHandler(psiFile)
+
+        assertNotNull("Expected Markdown structure handler", handler)
+        val nodes = handler!!.getFileStructure(psiFile, project)
+        val root = nodes.single()
+
+        assertEquals("Starter Pack", root.name)
+        assertEquals("HEADING", root.kind.name)
+        assertEquals(1, root.line)
+        assertEquals(listOf("Installation", "Usage"), root.children.map { it.name })
+        assertEquals("CLI Setup", root.children.first().children.single().name)
+        assertEquals(5, root.children.first().children.single().line)
+    }
+
     // Editor Tools Tests
 
     fun testGetActiveFileTool() = runBlocking {

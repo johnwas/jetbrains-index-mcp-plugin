@@ -12,7 +12,6 @@ object ParamNames {
 
     // Refactoring parameters
     const val DESTINATION = "destination"
-    const val UPDATE_REFERENCES = "update_references"
     const val NEW_NAME = "newName"
     const val METHOD_NAME = "methodName"
     const val VARIABLE_NAME = "variableName"

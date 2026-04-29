@@ -133,20 +133,20 @@ Find implementations of interfaces, abstract classes, or abstract methods.
 **Languages**: Java, Kotlin, Python, JS/TS, PHP, Rust (not Go).
 
 ### ide_find_symbol (disabled by default)
-Search for any symbol (classes, methods, fields, functions) by name.
+Search for any code symbol (classes, methods, fields, functions) by name.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `query` | string | yes | Symbol name pattern |
+| `query` | string | yes | Symbol name pattern. Matching follows IntelliJ's Go to Symbol popup, including qualified queries like `BasicSolver.run`. |
 | `scope` | enum | no | One of `project_files` (default), `project_and_libraries`, `project_production_files`, `project_test_files` |
 | `language` | string | no | Filter by language |
-| `matchMode` | enum | no | `substring` (default), `prefix`, `exact` |
 | `limit` | integer | no | Deprecated alias for `pageSize`. Default 25, max 500 |
 | `cursor` | string | no | Pagination cursor from a previous response. When provided, search parameters are ignored; `project_path` and `pageSize` may still be provided. |
 | `pageSize` | integer | no | Results per page. Default 25, max 500 |
 | `project_path` | string | no | Project root path |
 
 **Returns**: `{ symbols: [{name, qualifiedName, file, line, kind, language}], totalCount, query }`
+**Languages**: Java, Kotlin, Python, JS/TS, Go, PHP, Rust, plus other IDE-supplied symbol contributors where available.
 **Path note**: Project results use relative paths. Dependency/library results may use absolute paths or `jar://` URLs.
 
 ### ide_find_super_methods
@@ -210,7 +210,7 @@ Get hierarchical file structure like IDE's Structure panel.
 | `project_path` | string | no | Project root path |
 
 **Returns**: `{ file, language, structure }` (formatted tree with types, modifiers, signatures, line numbers)
-**Languages**: Java, Kotlin, Python, JS/TS.
+**Languages**: Java, Kotlin, Python, JS/TS, Markdown.
 
 ### ide_read_file (disabled by default)
 Read file content by path or qualified name, including library/jar sources.
@@ -242,8 +242,9 @@ Analyze a file for errors, warnings, and available quick fixes/intentions.
 | `endLine` | integer | no | Filter problems to range |
 | `project_path` | string | no | Project root path |
 
-**Returns**: `{ problems: [{message, severity, line, column, source}], intentions: [{name, description, familyName}], problemCount, intentionCount }`
-**Severity levels**: `ERROR`, `WARNING`, `WEAK_WARNING`, `INFO`
+**Returns**: `{ problems: [{message, severity, line, column, source}], intentions: [{name, description, familyName}], problemCount, intentionCount, analysisFresh, analysisTimedOut, analysisMessage }`
+**Notes**: Open files use fresh daemon highlights. Closed files use public batch analysis, so `WEAK_WARNING` results and quick-fix intentions may be less complete unless the file is already open in an editor.
+**Severity levels**: `ERROR`, `WARNING`, `WEAK_WARNING`
 
 ---
 
@@ -270,13 +271,12 @@ Rename a symbol and update ALL references (semantic rename, not find-replace). W
 **Supports IDE undo** (Ctrl+Z).
 
 ### ide_move_file
-Move a file to a new directory, updating all references, imports, and package declarations. Works across ALL languages.
+Move a file to a new directory. Applies language-aware reference, import, and package/namespace updates only when the IDE provides a semantic move backend for that file type.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `file` | string | yes | Relative path of file to move |
 | `destination` | string | yes | Target directory (relative to project root, created if needed) |
-| `update_references` | boolean | no | Update references (default true) |
 | `project_path` | string | no | Project root path |
 
 **Returns**: `{ success, affectedFiles: [paths], changesCount, message }`

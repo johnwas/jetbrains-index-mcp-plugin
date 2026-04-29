@@ -33,7 +33,7 @@ The IDE Index MCP server exposes JetBrains IDE indexing and refactoring capabili
 | Find a file by name | `ide_find_file` | `Glob` is fine for simple patterns |
 | Search for a word in code | `ide_search_text` | `Grep` is fine for regex patterns (IDE tool is exact-word only) |
 | Rename a symbol across project | `ide_refactor_rename` | Never - sed/replace breaks code |
-| Move a file to another directory | `ide_move_file` | Never - mv/git mv breaks imports |
+| Move a file to another directory | `ide_move_file` | Never - mv/git mv bypasses IDE move semantics |
 | Check for errors in a file | `ide_diagnostics` | Never - no equivalent |
 | Understand class hierarchy | `ide_type_hierarchy` | Never - no equivalent |
 | Find who calls a method | `ide_call_hierarchy` | Never - grep misses indirect calls |
@@ -89,7 +89,7 @@ Omit `paths` to sync the entire project.
 
 ### "I need to refactor"
 1. `ide_refactor_rename` - rename symbol + all references atomically
-2. `ide_move_file` - move file + update all imports/references
+2. `ide_move_file` - move file and let the IDE apply semantic updates when that language/backend supports them
 3. `ide_refactor_safe_delete` - delete with usage checking (Java/Kotlin only)
 4. `ide_reformat_code` - apply project code style (disabled by default)
 
@@ -109,7 +109,7 @@ Omit `paths` to sync the entire project.
 
 2. **Using sed/replace instead of `ide_refactor_rename`**: Text replacement breaks code. IDE rename updates all references, getters/setters, overrides, test classes, imports.
 
-3. **Using mv/git mv instead of `ide_move_file`**: File system moves don't update imports, package declarations, or references. IDE move handles all of this automatically.
+3. **Using mv/git mv instead of `ide_move_file`**: File system moves bypass IDE move semantics. `ide_move_file` can preserve IDE-managed package/namespace/reference updates when the active language backend supports them.
 
 4. **Forgetting to check index status**: If IDE is indexing (dumb mode), most tools error. Check `ide_index_status` first if a tool fails unexpectedly.
 
