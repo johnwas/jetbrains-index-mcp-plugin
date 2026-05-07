@@ -76,8 +76,9 @@ class ReformatCodeTool : AbstractMcpTool() {
     )
 
     override suspend fun doExecute(project: Project, arguments: JsonObject): ToolCallResult {
-        val file = arguments[ParamNames.FILE]?.jsonPrimitive?.content
-            ?: return createErrorResult("Missing required parameter: file")
+        val file = requiredStringArg(arguments, ParamNames.FILE).getOrElse {
+            return createErrorResult(it.message ?: "Missing required parameter: file")
+        }
         val startLine = arguments[ParamNames.START_LINE]?.jsonPrimitive?.int
         val endLine = arguments[ParamNames.END_LINE]?.jsonPrimitive?.int
         val optimizeImports = arguments[ParamNames.OPTIMIZE_IMPORTS]?.jsonPrimitive?.boolean ?: true
@@ -121,8 +122,8 @@ class ReformatCodeTool : AbstractMcpTool() {
             }
         }
 
-        // Commit and save outside EDT block — commitDocuments uses
-        // TransactionGuard.submitTransactionAndWait for write-safe context
+        // Commit and save outside EDT block; commitDocuments switches to a
+        // write-safe EDT modality.
         if (errorMessage == null) {
             commitDocuments(project)
             edtAction { FileDocumentManager.getInstance().saveAllDocuments() }

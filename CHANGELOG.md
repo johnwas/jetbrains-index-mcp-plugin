@@ -4,6 +4,20 @@
 
 ## [Unreleased]
 
+## [4.16.3] - 2026-05-06
+### Fixed
+- **`ide_refactor_rename` no longer fails while committing documents from MCP requests** — Document commits now switch to a write-safe non-modal EDT context instead of using deprecated synchronous transaction submission from the request coroutine's write-unsafe modality. Fixes [#172](https://github.com/hechtcarmel/jetbrains-index-mcp-plugin/issues/172).
+
+## [4.16.2] - 2026-05-03
+### Fixed
+- **Blank pagination cursors now start fresh searches** — Search/navigation tools now treat missing, null, blank, and whitespace-only `cursor` values as absent, so clients that send `"cursor": ""` no longer get invalid-cursor errors.
+- **Blank symbol/position lookup arguments are ignored consistently** — Shared lookup resolution now treats blank `file`, `language`, and `symbol` values as absent, preventing false symbol-vs-position conflicts and improving missing-parameter errors.
+- **Blank required file arguments now fail clearly** — File-based editor and refactoring tools now reject blank required path arguments with `Missing required parameter` errors instead of attempting to resolve empty paths.
+
+## [4.16.1] - 2026-04-30
+### Fixed
+- **Install on Coding Agents now works on Windows for Codex CLI and Claude Code** — Direct installation no longer assumes a POSIX `sh` shell. Windows installs now run through `cmd.exe` with Windows-compatible command separators and null-output redirection, and copied Windows install commands are wrapped for terminal paste. Fixes [#165](https://github.com/hechtcarmel/jetbrains-index-mcp-plugin/issues/165).
+
 ## [4.16.0] - 2026-04-24
 ### Fixed
 - **`ide_find_symbol` ordering, missing/extra results, and qualified-query handling now match IntelliJ's Go to Symbol popup.** The tool previously ran the popup search separately for each registered language handler and concatenated results in handler-iteration order, which destroyed cross-language ranking. Symbol search now issues a single popup-backed call.

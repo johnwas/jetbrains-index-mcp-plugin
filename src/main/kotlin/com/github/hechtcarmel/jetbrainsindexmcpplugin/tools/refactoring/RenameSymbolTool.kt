@@ -108,8 +108,9 @@ class RenameSymbolTool : AbstractMcpTool() {
     )
 
     override suspend fun doExecute(project: Project, arguments: JsonObject): ToolCallResult {
-        val file = arguments["file"]?.jsonPrimitive?.content
-            ?: return createErrorResult("Missing required parameter: file")
+        val file = requiredStringArg(arguments, "file").getOrElse {
+            return createErrorResult(it.message ?: "Missing required parameter: file")
+        }
         val line = arguments["line"]?.jsonPrimitive?.int
         val column = arguments["column"]?.jsonPrimitive?.int
         val newName = arguments["newName"]?.jsonPrimitive?.content
@@ -173,8 +174,8 @@ class RenameSymbolTool : AbstractMcpTool() {
             }
         }
 
-        // Commit and save outside EDT block — commitDocuments uses
-        // TransactionGuard.submitTransactionAndWait for write-safe context
+        // Commit and save outside EDT block; commitDocuments switches to a
+        // write-safe EDT modality.
         if (errorMessage == null) {
             commitDocuments(project)
             edtAction { FileDocumentManager.getInstance().saveAllDocuments() }
